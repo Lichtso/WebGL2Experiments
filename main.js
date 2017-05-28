@@ -4,27 +4,53 @@ const igpAlpha = Math.sin(0.3*Math.PI)/Math.sin(0.4*Math.PI),
 
 function IcosahedralClass1GoldbergPolyhedron(gpIndex) {
     this.gpIndex = gpIndex;
-    this.hexCount = (this.gpIndex*this.gpIndex-1)*10;
-    console.log(this.gpIndex, this.hexCount);
+    this.hexCountPerEdgeAtLayer = [];
+    for(var layer = 0; layer <= this.gpIndex; ++layer)
+        this.hexCountPerEdgeAtLayer.push(layer);
+    for(var layer = this.gpIndex; layer < this.gpIndex*2; ++layer)
+        this.hexCountPerEdgeAtLayer.push(this.gpIndex);
+    for(var layer = this.gpIndex-1; layer >= 0; --layer)
+        this.hexCountPerEdgeAtLayer.push(layer);
+    this.offsetAtLayer = [];
+    for(var accumulator = 1, layer = 0; layer <= this.gpIndex*3; ++layer) {
+        accumulator += this.hexCountPerEdgeAtLayer[layer]*5;
+        this.offsetAtLayer.push(accumulator);
+    }
+    ++this.offsetAtLayer[this.gpIndex*3];
+    console.log(this.gpIndex, this.hexCountPerEdgeAtLayer, this.offsetAtLayer);
+
     this.edgeLength = 0.5;
     this.poleDistance = this.gpIndex*this.edgeLength*igpBeta;
     this.sphereRadius = this.poleDistance*igpAlpha*igpGamma;
-    const poles = [];
-
+    const southPole = linearAlgebra.vec3.fromValues(0, -igpGamma*this.poleDistance, 0),
+          northPole = linearAlgebra.vec3.fromValues(0, igpGamma*this.poleDistance, 0),
+          southernPoles = [], northernPoles = [];
     for(var i = 0; i < 5; ++i) {
-        const angle = Math.PI*2*i/5, x = Math.sin(angle), y = Math.cos(angle);
-        poles.push(linearAlgebra.vec3.fromValues(x, -0.5, y));
-        poles.push(linearAlgebra.vec3.fromValues(x, 0.5, -y));
+        const angle = Math.PI*2*i/5,
+              x = Math.sin(angle)*this.poleDistance,
+              y = Math.cos(angle)*this.poleDistance;
+        southernPoles.push(linearAlgebra.vec3.fromValues(-x, -0.5*this.poleDistance, -y));
+        northernPoles.push(linearAlgebra.vec3.fromValues(x, 0.5*this.poleDistance, y));
     }
-    poles.push(linearAlgebra.vec3.fromValues(0, -igpGamma, 0));
-    poles.push(linearAlgebra.vec3.fromValues(0, igpGamma, 0));
-    this.points = poles.slice();
+    this.fieldVertices = new Float32Array(this.offsetAtLayer[this.gpIndex*3]*3);
+    this.borderVertices = this.fieldVertices;
 
-    this.generatePointsInTriangle = function(a, b, c, fillSecondEdge=0) {
-        const point = linearAlgebra.vec3.create(),
-              poleA = poles[a],
-              poleB = poles[b%10],
-              poleC = poles[c%10],
+    this.isPole = function(layerIndex, indexInLayer) {
+        return (layerIndex%this.gpIndex == 0 && indexInLayer%this.hexCountPerEdgeAtLayer[layerIndex] == 0);
+    };
+    this.getOffset = function(layerIndex, indexInLayer) {
+        return this.offsetAtLayer[layerIndex-1]+indexInLayer;
+    };
+
+    const setFieldVertexAt = function(index, fieldVertex) {
+        linearAlgebra.vec3.normalize(fieldVertex, fieldVertex);
+        linearAlgebra.vec3.scale(fieldVertex, fieldVertex, this.sphereRadius);
+        this.fieldVertices[index*3+0] = fieldVertex[0];
+        this.fieldVertices[index*3+1] = fieldVertex[1];
+        this.fieldVertices[index*3+2] = fieldVertex[2];
+    }.bind(this);
+    const generateFieldVertices = function(poleAIndex, poleALayer, mode, poleA, poleB, poleC, fillSecondEdge=0) {
+        const fieldVertex = linearAlgebra.vec3.create(),
               dirAB = linearAlgebra.vec3.create(),
               dirBC = linearAlgebra.vec3.create(),
               vecAB = linearAlgebra.vec3.create(),
@@ -33,29 +59,28 @@ function IcosahedralClass1GoldbergPolyhedron(gpIndex) {
         linearAlgebra.vec3.subtract(dirBC, poleC, poleB);
         linearAlgebra.vec3.scale(dirAB, dirAB, 1.0/this.gpIndex);
         linearAlgebra.vec3.scale(dirBC, dirBC, 1.0/this.gpIndex);
-        for(var i = 1; i < this.gpIndex; ++i)
-            for(var j = 0; j < i+fillSecondEdge; ++j) {
+        if(mode > 1)
+            ++poleAIndex;
+        for(var i = 1; i < this.gpIndex+fillSecondEdge; ++i) {
+            const layerIndex = poleALayer+(mode > 0 ? -i : i),
+                  layerOffset = this.offsetAtLayer[layerIndex-1]+poleAIndex*this.hexCountPerEdgeAtLayer[layerIndex]+((mode > 1) ? -i : 0);
+            for(var j = 0; j < i; ++j) {
                 linearAlgebra.vec3.scale(vecAB, dirAB, i);
                 linearAlgebra.vec3.scale(vecBC, dirBC, j);
-                linearAlgebra.vec3.add(point, vecAB, vecBC);
-                linearAlgebra.vec3.add(point, point, poleA);
-                this.points.push(linearAlgebra.vec3.clone(point));
+                linearAlgebra.vec3.add(fieldVertex, vecAB, vecBC);
+                linearAlgebra.vec3.add(fieldVertex, fieldVertex, poleA);
+                setFieldVertexAt(layerOffset+j, fieldVertex);
             }
-    };
-    for(var i = 0; i < 10; i += 2) {
-        this.generatePointsInTriangle(10, i, i+2);
-        this.generatePointsInTriangle(11, i+1, i+3);
-        this.generatePointsInTriangle(i, i+2, 15-i, 1);
-        this.generatePointsInTriangle((i+3)%10, i+1, 14-i, 1);
-    }
-
-    this.positions = new Float32Array(this.points.length*3);
-    for(var i = 0; i < this.points.length; ++i) {
-        linearAlgebra.vec3.normalize(this.points[i], this.points[i]);
-        linearAlgebra.vec3.scale(this.points[i], this.points[i], this.sphereRadius);
-        this.positions[i*3+0] = this.points[i][0];
-        this.positions[i*3+1] = this.points[i][1];
-        this.positions[i*3+2] = this.points[i][2];
+        }
+    }.bind(this);
+    setFieldVertexAt(0, linearAlgebra.vec3.clone(southPole));
+    setFieldVertexAt(this.offsetAtLayer[this.gpIndex*3]-1, linearAlgebra.vec3.clone(northPole));
+    for(var i = 0; i < 5; ++i) {
+        const i1 = (i+1)%5, i2 = (i+2)%5, i3 = (i+3)%5;
+        generateFieldVertices(i, 0, 0, southPole, southernPoles[i], southernPoles[i1]);
+        generateFieldVertices(i, this.gpIndex*2, 2, northernPoles[i3], southernPoles[i], southernPoles[i1], 1);
+        generateFieldVertices(i, this.gpIndex, 0, southernPoles[i], northernPoles[i2], northernPoles[i3], 1);
+        generateFieldVertices(i, this.gpIndex*3, 1, northPole, northernPoles[i2], northernPoles[i3]);
     }
 }
 
@@ -128,7 +153,7 @@ const positionAttributeLocation = gl.getAttribLocation(program, 'position'),
       vertexArray = gl.createVertexArray();
 const planet = new IcosahedralClass1GoldbergPolyhedron(4);
 gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-gl.bufferData(gl.ARRAY_BUFFER, planet.positions, gl.STATIC_DRAW);
+gl.bufferData(gl.ARRAY_BUFFER, planet.borderVertices, gl.STATIC_DRAW);
 gl.bindVertexArray(vertexArray);
 gl.enableVertexAttribArray(positionAttributeLocation);
 gl.vertexAttribPointer(positionAttributeLocation, 3, gl.FLOAT, false, 0, 0);
@@ -141,6 +166,6 @@ window.setInterval(function() {
     linearAlgebra.mat4.multiply(rotationMat, projectionMat, rotationMat);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniformMatrix4fv(gl.getUniformLocation(program, 'projection'), false, rotationMat);
-    gl.drawArrays(gl.POINTS, 0, planet.points.length);
+    gl.drawArrays(gl.POINTS, 0, planet.borderVertices.length/3);
     rotation += 0.01;
 }, 1000/25);
