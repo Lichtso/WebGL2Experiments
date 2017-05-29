@@ -3,6 +3,18 @@ const igpAlpha = Math.sin(0.3*Math.PI)/Math.sin(0.4*Math.PI),
       igpGamma = Math.sqrt(5/4);
 
 function IcosahedralClass1GoldbergPolyhedron(gpIndex) {
+    this.isPole = function(layerIndex, indexInLayer) {
+        return (layerIndex%this.gpIndex == 0 && indexInLayer%this.hexCountPerEdgeAtLayer[layerIndex] == 0);
+    };
+    this.getFieldVertex = function(layerIndex, indexInLayer) {
+        const offset = (layerIndex == 0) ? 0 : (this.offsetAtLayer[layerIndex-1]+indexInLayer)*3;
+        return linearAlgebra.vec3.fromValues(this.fieldVertices[offset], this.fieldVertices[offset+1], this.fieldVertices[offset+2]);
+    };
+    this.wrapIndexInLayer = function(layerIndex, indexInLayer) {
+        return (layerIndex == 0 || layerIndex == this.gpIndex*3) ? 0 : indexInLayer%(this.hexCountPerEdgeAtLayer[layerIndex]*5);
+    };
+
+    // Generate layers
     this.gpIndex = gpIndex;
     this.hexCountPerEdgeAtLayer = [];
     for(var layer = 0; layer <= this.gpIndex; ++layer)
@@ -19,6 +31,7 @@ function IcosahedralClass1GoldbergPolyhedron(gpIndex) {
     ++this.offsetAtLayer[this.gpIndex*3];
     console.log(this.gpIndex, this.hexCountPerEdgeAtLayer, this.offsetAtLayer);
 
+    // Generate 12 poles (icosahedron)
     this.edgeLength = 0.5;
     this.poleDistance = this.gpIndex*this.edgeLength*igpBeta;
     this.sphereRadius = this.poleDistance*igpAlpha*igpGamma;
@@ -32,16 +45,9 @@ function IcosahedralClass1GoldbergPolyhedron(gpIndex) {
         southernPoles.push(linearAlgebra.vec3.fromValues(-x, -0.5*this.poleDistance, -y));
         northernPoles.push(linearAlgebra.vec3.fromValues(x, 0.5*this.poleDistance, y));
     }
+
+    // Generate field vertices (barycentric interpolation)
     this.fieldVertices = new Float32Array(this.offsetAtLayer[this.gpIndex*3]*3);
-    this.borderVertices = this.fieldVertices;
-
-    this.isPole = function(layerIndex, indexInLayer) {
-        return (layerIndex%this.gpIndex == 0 && indexInLayer%this.hexCountPerEdgeAtLayer[layerIndex] == 0);
-    };
-    this.getOffset = function(layerIndex, indexInLayer) {
-        return this.offsetAtLayer[layerIndex-1]+indexInLayer;
-    };
-
     const setFieldVertexAt = function(index, fieldVertex) {
         linearAlgebra.vec3.normalize(fieldVertex, fieldVertex);
         linearAlgebra.vec3.scale(fieldVertex, fieldVertex, this.sphereRadius);
@@ -49,7 +55,7 @@ function IcosahedralClass1GoldbergPolyhedron(gpIndex) {
         this.fieldVertices[index*3+1] = fieldVertex[1];
         this.fieldVertices[index*3+2] = fieldVertex[2];
     }.bind(this);
-    const generateFieldVertices = function(poleAIndex, poleALayer, mode, poleA, poleB, poleC, fillSecondEdge=0) {
+    const interpolatePoles = function(poleAIndex, poleALayer, mode, poleA, poleB, poleC, fillSecondEdge=0) {
         const fieldVertex = linearAlgebra.vec3.create(),
               dirAB = linearAlgebra.vec3.create(),
               dirBC = linearAlgebra.vec3.create(),
@@ -75,12 +81,46 @@ function IcosahedralClass1GoldbergPolyhedron(gpIndex) {
     }.bind(this);
     setFieldVertexAt(0, linearAlgebra.vec3.clone(southPole));
     setFieldVertexAt(this.offsetAtLayer[this.gpIndex*3]-1, linearAlgebra.vec3.clone(northPole));
-    for(var i = 0; i < 5; ++i) {
-        const i1 = (i+1)%5, i2 = (i+2)%5, i3 = (i+3)%5;
-        generateFieldVertices(i, 0, 0, southPole, southernPoles[i], southernPoles[i1]);
-        generateFieldVertices(i, this.gpIndex*2, 2, northernPoles[i3], southernPoles[i], southernPoles[i1], 1);
-        generateFieldVertices(i, this.gpIndex, 0, southernPoles[i], northernPoles[i2], northernPoles[i3], 1);
-        generateFieldVertices(i, this.gpIndex*3, 1, northPole, northernPoles[i2], northernPoles[i3]);
+    for(var poleIndex = 0; poleIndex < 5; ++poleIndex) {
+        const i0 = poleIndex, i1 = (poleIndex+1)%5, i2 = (poleIndex+2)%5, i3 = (poleIndex+3)%5;
+        interpolatePoles(i0, 0, 0, southPole, southernPoles[i0], southernPoles[i1]);
+        interpolatePoles(i0, this.gpIndex*2, 2, northernPoles[i3], southernPoles[i0], southernPoles[i1], 1);
+        interpolatePoles(i0, this.gpIndex, 0, southernPoles[i0], northernPoles[i2], northernPoles[i3], 1);
+        interpolatePoles(i0, this.gpIndex*3, 1, northPole, northernPoles[i2], northernPoles[i3]);
+    }
+
+    // Generate border vertices (tesselation)
+    this.borderVertices = new Float32Array(this.gpIndex*this.gpIndex*20*3);
+    const setBorderVertexAt = function(index, fieldVertexA, fieldVertexB, fieldVertexC) {
+        const borderVertex = linearAlgebra.vec3.create();
+        linearAlgebra.vec3.add(borderVertex, fieldVertexA, fieldVertexB);
+        linearAlgebra.vec3.add(borderVertex, borderVertex, fieldVertexC);
+        linearAlgebra.vec3.scale(borderVertex, borderVertex, 1.0/3.0);
+        this.borderVertices[index*3+0] = borderVertex[0];
+        this.borderVertices[index*3+1] = borderVertex[1];
+        this.borderVertices[index*3+2] = borderVertex[2];
+    }.bind(this);
+    var borderVertexIndex = 0;
+    for(var layerIndex = 0; layerIndex <= this.gpIndex*3; ++layerIndex) {
+        const hexCountPerEdge = this.hexCountPerEdgeAtLayer[layerIndex]+this.hexCountPerEdgeAtLayer[layerIndex+1],
+              hemiSphere = (layerIndex < this.gpIndex*2) ? 0 : 1;
+        var lowerIndex = 0, upperIndex = 0,
+            lowerFiledVertex = this.getFieldVertex(layerIndex, lowerIndex),
+            upperFiledVertex = this.getFieldVertex(layerIndex+1, upperIndex);
+        for(var poleIndex = 0; poleIndex < 5; ++poleIndex)
+            for(var indexInEdge = 0; indexInEdge < hexCountPerEdge; ++indexInEdge) {
+                if(indexInEdge%2 == hemiSphere) { // Downward Triangle
+                    const prevUpperFiledVertex = upperFiledVertex;
+                    upperIndex = this.wrapIndexInLayer(layerIndex+1, upperIndex+1);
+                    upperFiledVertex = this.getFieldVertex(layerIndex+1, upperIndex);
+                    setBorderVertexAt(borderVertexIndex++, lowerFiledVertex, upperFiledVertex, prevUpperFiledVertex);
+                } else { // Upward Triangle
+                    const prevLowerFiledVertex = lowerFiledVertex;
+                    lowerIndex = this.wrapIndexInLayer(layerIndex, lowerIndex+1);
+                    lowerFiledVertex = this.getFieldVertex(layerIndex, lowerIndex);
+                    setBorderVertexAt(borderVertexIndex++, lowerFiledVertex, upperFiledVertex, prevLowerFiledVertex);
+                }
+            }
     }
 }
 
@@ -119,10 +159,11 @@ void main() {
 const fragmentShaderSource = `
 precision mediump float;
 
+uniform vec3 color;
 out vec4 outColor;
 
 void main() {
-    outColor = vec4(0, 0, 0, 1);
+    outColor = vec4(color, 1);
 }`;
 
 const linearAlgebra = require('./gl-matrix/src/gl-matrix.js'),
@@ -149,14 +190,17 @@ linearAlgebra.mat4.perspective(projectionMat, 45/180*Math.PI, gl.canvas.width/gl
 linearAlgebra.mat4.translate(projectionMat, projectionMat, [0, 0, -10]);
 
 const positionAttributeLocation = gl.getAttribLocation(program, 'position'),
-      positionBuffer = gl.createBuffer(),
+      fieldVertexBuffer = gl.createBuffer(),
+      borderVertexBuffer = gl.createBuffer(),
       vertexArray = gl.createVertexArray();
-const planet = new IcosahedralClass1GoldbergPolyhedron(4);
-gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+const planet = new IcosahedralClass1GoldbergPolyhedron(2);
+gl.bindBuffer(gl.ARRAY_BUFFER, fieldVertexBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, planet.fieldVertices, gl.STATIC_DRAW);
+gl.bindBuffer(gl.ARRAY_BUFFER, borderVertexBuffer);
 gl.bufferData(gl.ARRAY_BUFFER, planet.borderVertices, gl.STATIC_DRAW);
 gl.bindVertexArray(vertexArray);
 gl.enableVertexAttribArray(positionAttributeLocation);
-gl.vertexAttribPointer(positionAttributeLocation, 3, gl.FLOAT, false, 0, 0);
+// gl.vertexAttribPointer(positionAttributeLocation, 3, gl.FLOAT, false, 0, 0);
 gl.useProgram(program);
 
 var rotation = 0;
@@ -164,8 +208,17 @@ const rotationMat = linearAlgebra.mat4.create();
 window.setInterval(function() {
     linearAlgebra.mat4.fromYRotation(rotationMat, rotation);
     linearAlgebra.mat4.multiply(rotationMat, projectionMat, rotationMat);
+    rotation += 0.01;
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniformMatrix4fv(gl.getUniformLocation(program, 'projection'), false, rotationMat);
-    gl.drawArrays(gl.POINTS, 0, planet.borderVertices.length/3);
-    rotation += 0.01;
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, fieldVertexBuffer);
+    gl.vertexAttribPointer(positionAttributeLocation, 3, gl.FLOAT, false, 0, 0);
+    gl.uniform3f(gl.getUniformLocation(program, 'color'), 1, 0, 0);
+    gl.drawArrays(gl.POINTS, 0, planet.fieldVertices.length/3);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, borderVertexBuffer);
+    gl.vertexAttribPointer(positionAttributeLocation, 3, gl.FLOAT, false, 0, 0);
+    gl.uniform3f(gl.getUniformLocation(program, 'color'), 0, 0, 0);
+    gl.drawArrays(gl.LINE_STRIP, 0, planet.borderVertices.length/3);
 }, 1000/25);
