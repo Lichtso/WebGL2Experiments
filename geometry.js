@@ -2,7 +2,7 @@ const linearAlgebra = require('./gl-matrix/src/gl-matrix.js');
 
 exports.IcosahedralClass1GoldbergPolyhedron = function(gl, ctx, gpIndex) {
     this.edgeLength = 0.5;
-    this.texcoordEdgeLength = 20;
+    this.texcoordEdgeLength = 25;
     this.gl = gl;
     this.gpIndex = gpIndex;
     this.generateGeometry();
@@ -32,7 +32,7 @@ prototype.getBorderVertexCountAtLayer = function(layerIndex) {
     return (this.gpIndex*3-layerIndex)*2-1;
 };
 
-prototype.getFieldVertexOffset = function(indexInLayer, layerIndex) {
+prototype.getFieldVertexIndex = function(indexInLayer, layerIndex) {
     if(layerIndex == 0)
         return 0;
     var offset;
@@ -48,7 +48,7 @@ prototype.getFieldVertexOffset = function(indexInLayer, layerIndex) {
     return offset*5+1+indexInLayer;
 };
 
-prototype.getBorderVertexOffset = function(indexInLayer, layerIndex) {
+prototype.getBorderVertexIndex = function(indexInLayer, layerIndex) {
     var offset;
     if(layerIndex < this.gpIndex)
         offset = layerIndex*layerIndex;
@@ -62,7 +62,7 @@ prototype.getBorderVertexOffset = function(indexInLayer, layerIndex) {
 };
 
 prototype.getVertexPosition = function(indexInLayer, layerIndex) {
-    const offset = this.getFieldVertexOffset(indexInLayer, layerIndex)*3;
+    const offset = this.getFieldVertexIndex(indexInLayer, layerIndex)*3;
     return linearAlgebra.vec3.fromValues(this.positions[offset], this.positions[offset+1], this.positions[offset+2]);
 };
 
@@ -108,7 +108,7 @@ prototype.generateGeometry = function() {
           dirBC = linearAlgebra.vec3.create(),
           vecAB = linearAlgebra.vec3.create(),
           vecBC = linearAlgebra.vec3.create();
-    const setVertex = function(offset) {
+    const generateVertex = function(offset) {
         offset *= 3;
         linearAlgebra.vec3.normalize(position, position);
         linearAlgebra.vec3.scale(position, position, sphereRadius);
@@ -138,16 +138,16 @@ prototype.generateGeometry = function() {
                 linearAlgebra.vec3.add(position, vecAB, vecBC);
                 linearAlgebra.vec3.add(position, position, poleA);
                 linearAlgebra.vec3.copy(normal, position);
-                setVertex(this.getFieldVertexOffset(indexInLayer+j, layerIndex));
+                generateVertex(this.getFieldVertexIndex(indexInLayer+j, layerIndex));
             }
         }
     }.bind(this);
     linearAlgebra.vec3.copy(position, southPole);
     linearAlgebra.vec3.copy(normal, [0, -1, 0]);
-    setVertex(this.getFieldVertexOffset(0, 0));
+    generateVertex(this.getFieldVertexIndex(0, 0));
     linearAlgebra.vec3.copy(position, northPole);
     linearAlgebra.vec3.copy(normal, [0, 1, 0]);
-    setVertex(this.getFieldVertexOffset(0, this.gpIndex*3));
+    generateVertex(this.getFieldVertexIndex(0, this.gpIndex*3));
     for(var poleIndex = 0; poleIndex < 5; ++poleIndex) {
         const i0 = poleIndex, i1 = (poleIndex+1)%5, i2 = (poleIndex+2)%5, i3 = (poleIndex+3)%5;
         interpolatePoles(i0, 0, 0, southPole, southernPoles[i0], southernPoles[i1]);
@@ -163,8 +163,7 @@ prototype.generateGeometry = function() {
         linearAlgebra.vec3.cross(normal, dirAB, dirBC);
         linearAlgebra.vec3.add(position, fieldVertexA, fieldVertexB);
         linearAlgebra.vec3.add(position, position, fieldVertexC);
-        // linearAlgebra.vec3.scale(position, position, 1.0/3.0); // Gets normalized anyway
-        setVertex(borderVertexIndex++);
+        generateVertex(borderVertexIndex++);
     }.bind(this);
     var borderVertexIndex = this.fieldVertexCount;
     for(var layerIndex = 0; layerIndex <= this.gpIndex*3; ++layerIndex) {
@@ -200,116 +199,125 @@ prototype.generateTopology = function(ctx) {
           texcoordWidth = texcoordHeight*Math.sqrt(3)/2,
           texcoordDirS = linearAlgebra.vec2.fromValues(texcoordWidth, 0),
           texcoordDirT = linearAlgebra.vec2.fromValues(texcoordWidth*0.5, texcoordHeight*3/4);
-    var outVertexOffset = 0;
-    const setTexcoord = function(vertexOffset, hexX, hexY) {
+    const generateTexcoord = function(vertexIndex, hexX, hexY) {
         linearAlgebra.vec3.scale(fieldTexcoord, texcoordDirT, hexY);
-        fieldTexcoord[0] += (hexX+0.5)*texcoordWidth;
-        fieldTexcoord[1] += texcoordHeight*0.5;
-        vertexOffset *= 2;
-        this.texcoords[vertexOffset+0] = fieldTexcoord[0];
-        this.texcoords[vertexOffset+1] = fieldTexcoord[1];
+        fieldTexcoord[0] += hexX*texcoordWidth+50;
+        fieldTexcoord[1] += texcoordHeight*0.5+20; // TODO
+        vertexIndex *= 2;
+        this.texcoords[vertexIndex+0] = fieldTexcoord[0];
+        this.texcoords[vertexIndex+1] = fieldTexcoord[1];
     }.bind(this);
-    const setOutVertex = function(outVertexOffset, vertexOffset, direction) {
+    var outVertexIndex = 0;
+    const setOutVertex = function(TODO_outVertexIndex, vertexIndex, direction) {
         linearAlgebra.vec2.copy(texcoord, fieldTexcoord);
         switch(direction) {
             case 0:
-                texcoord[0] += texcoordWidth*0.5;
-                texcoord[1] += texcoordHeight*0.25;
+                texcoord[1] += texcoordHeight*0.5;
                 break;
             case 1:
                 texcoord[0] += texcoordWidth*0.5;
-                texcoord[1] -= texcoordHeight*0.25;
-                break;
-            case 2:
-                texcoord[1] -= texcoordHeight*0.5;
-                break;
-            case 3:
-                texcoord[0] -= texcoordWidth*0.5;
-                texcoord[1] -= texcoordHeight*0.25;
-                break;
-            case 4:
-                texcoord[0] -= texcoordWidth*0.5;
                 texcoord[1] += texcoordHeight*0.25;
                 break;
-            case 5:
-                texcoord[1] += texcoordHeight*0.5;
-                break;
         }
-        if(direction < 6) {
-            ctx.fillRect(texcoord[0], texcoord[1], 1, 1);
+        if(direction < 2) {
+            if(vertexIndex == undefined)
+                ctx.fillRect(texcoord[0]-1, texcoord[1]-1, 3, 3);
+            else
+                ctx.fillText(vertexIndex, texcoord[0]-10, texcoord[1]+3);
+            ++outVertexIndex;
         }
-        /*const outVertexOffset = outVertexOffset*8;
-        vertexOffset *= 3;
-        outVertices[outVertexOffset+0] = this.positions[vertexOffset+0];
-        outVertices[outVertexOffset+1] = this.positions[vertexOffset+1];
-        outVertices[outVertexOffset+2] = this.positions[vertexOffset+2];
-        outVertices[outVertexOffset+3] = this.normals[vertexOffset+0];
-        outVertices[outVertexOffset+4] = this.normals[vertexOffset+1];
-        outVertices[outVertexOffset+5] = this.normals[vertexOffset+2];
-        outVertices[outVertexOffset+6] = texcoord[0];
-        outVertices[outVertexOffset+7] = texcoord[1];*/
+
+        /*outVertexIndex = outVertexIndex*8;
+        vertexIndex *= 3;
+        outVertices[outVertexIndex+0] = this.positions[vertexIndex+0];
+        outVertices[outVertexIndex+1] = this.positions[vertexIndex+1];
+        outVertices[outVertexIndex+2] = this.positions[vertexIndex+2];
+        outVertices[outVertexIndex+3] = this.normals[vertexIndex+0];
+        outVertices[outVertexIndex+4] = this.normals[vertexIndex+1];
+        outVertices[outVertexIndex+5] = this.normals[vertexIndex+2];
+        outVertices[outVertexIndex+6] = texcoord[0];
+        outVertices[outVertexIndex+7] = texcoord[1];*/
     }.bind(this);
-    var hexX, hexY = this.gpIndex-2;
-    for(var layerIndex = this.gpIndex+1; layerIndex <= this.gpIndex*2; ++layerIndex) {
-        hexX = 0;
-        for(var indexInLayer = 0; indexInLayer < this.getFieldVertexCountAtLayer(layerIndex)*5; ++indexInLayer) {
-            setTexcoord(this.getFieldVertexOffset(indexInLayer, layerIndex), hexX, hexY);
-            if(layerIndex < this.gpIndex*2) {
-                setOutVertex(0, this.getFieldVertexOffset(indexInLayer, layerIndex), 6);
-                ctx.fillText(indexInLayer+' '+layerIndex, fieldTexcoord[0]-10, fieldTexcoord[1]+3);
-            }
 
-            setOutVertex(0, this.getFieldVertexOffset(indexInLayer, layerIndex), 4);
-            setOutVertex(0, this.getFieldVertexOffset(indexInLayer, layerIndex), 5);
-            if(indexInLayer == this.getFieldVertexCountAtLayer(layerIndex)*5-1)
-                setOutVertex(0, this.getFieldVertexOffset(indexInLayer, layerIndex), 0);
-
-            ++hexX;
-        }
-        setTexcoord(this.getFieldVertexOffset(0, layerIndex), hexX, hexY);
-        if(layerIndex > this.gpIndex+1)
-            setOutVertex(0, this.getFieldVertexOffset(indexInLayer, layerIndex), 5);
-        --hexY;
-    }
-    for(var layerIndex = 1; layerIndex <= this.gpIndex; ++layerIndex) {
-        hexX = layerIndex;
-        hexY = 0;
-        for(var poleIndex = 0; poleIndex < 5; ++poleIndex)
+    var fieldVertexIndex = 1, borderVertexIndex = 0; // this.fieldVertexCount;
+    for(var layerIndex = 1; layerIndex < this.gpIndex*3; ++layerIndex) {
+        const hexY = this.gpIndex*3-layerIndex-1,
+              borderVertexCountAtLayer0 = this.getBorderVertexCountAtLayer(layerIndex),
+              borderVertexCountAtLayer1 = this.getBorderVertexCountAtLayer(layerIndex-1),
+              borderVertexCountAtLayer2 = this.getBorderVertexCountAtLayer(layerIndex-2);
+        for(var poleIndex = 0; poleIndex < 5; ++poleIndex) {
             for(var indexInEdge = 0; indexInEdge < this.getFieldVertexCountAtLayer(layerIndex); ++indexInEdge) {
                 const indexInLayer = this.getFieldVertexCountAtLayer(layerIndex)*poleIndex+indexInEdge;
-                if(layerIndex < this.gpIndex || indexInEdge > 0) {
-                    var vertexOffset = this.getFieldVertexOffset(indexInLayer, layerIndex);
-                    setTexcoord(vertexOffset, 1+hexX+hexY, this.gpIndex*2-hexY);
-                    setOutVertex(0, vertexOffset, 6);
-                    ctx.fillText(indexInLayer+' '+layerIndex, fieldTexcoord[0]-10, fieldTexcoord[1]+3);
+                var hexX = indexInEdge+this.gpIndex*poleIndex+1-this.gpIndex/2;
+                if(layerIndex > this.gpIndex*2)
+                    hexX += layerIndex-this.gpIndex*2;
+                generateTexcoord(fieldVertexIndex, hexX, hexY);
+                if(this.isPole(indexInLayer, layerIndex))
+                    ctx.fillStyle = 'red';
+                ctx.fillText(indexInLayer+','+layerIndex, fieldTexcoord[0]-10, fieldTexcoord[1]+3);
+                ctx.fillStyle = 'black';
+                setOutVertex(0, fieldVertexIndex, 2);
 
-                    vertexOffset = this.getFieldVertexOffset(indexInLayer, this.gpIndex*3-layerIndex);
-                    setTexcoord(vertexOffset, this.gpIndex*2+2+hexX, this.gpIndex*2+hexY);
-                    setOutVertex(0, vertexOffset, 6);
-                    ctx.fillText(indexInLayer+' '+(this.gpIndex*3-layerIndex), fieldTexcoord[0]-10, fieldTexcoord[1]+3);
+                if(indexInEdge == 0 && (poleIndex == 0 || layerIndex < this.gpIndex || layerIndex > this.gpIndex*2)) {
+                    fieldTexcoord[0] -= texcoordWidth;
+                    if(layerIndex > this.gpIndex*2+1) {
+                        if(poleIndex == 0)
+                            setOutVertex(0, borderVertexIndex-2, 0);
+                        else
+                            setOutVertex(0, borderVertexIndex-borderVertexCountAtLayer2*(5-poleIndex)-borderVertexCountAtLayer1*poleIndex-2, 0);
+
+                    }
+
+                    if(poleIndex > 0 || layerIndex%this.gpIndex > 0) {
+                        if(layerIndex > this.gpIndex*2)
+                            setOutVertex(0, (poleIndex == 0) ? borderVertexIndex+borderVertexCountAtLayer1*5-1 : borderVertexIndex-1, 1);
+                        else if(layerIndex > this.gpIndex)
+                            setOutVertex(0, borderVertexIndex+borderVertexCountAtLayer1*5-2, 1);
+                        else if(poleIndex == 0)
+                            setOutVertex(0, borderVertexIndex+(borderVertexCountAtLayer1+borderVertexCountAtLayer0)*5-2, 1);
+                        else
+                            setOutVertex(0, borderVertexIndex+borderVertexCountAtLayer0*5-(6-poleIndex)*2, 1);
+                    }
+
+                    fieldTexcoord[0] += texcoordWidth;
                 }
-                switch(poleIndex) {
-                    case 0:
-                        --hexY;
-                        break;
-                    case 1:
-                        --hexX;
-                        break;
-                    case 2:
-                        --hexX;
-                        ++hexY;
-                        break;
-                    case 3:
-                        ++hexY;
-                        break;
-                    case 4:
-                        ++hexX;
-                        break;
-                    case 5:
-                        ++hexX;
-                        --hexY;
-                        break;
+
+                if(indexInEdge > 0 ||
+                   (poleIndex == 0 && layerIndex > this.gpIndex*2) ||
+                   (poleIndex > 0 && layerIndex > this.gpIndex))
+                    setOutVertex(0, borderVertexIndex++, 0);
+                else if(poleIndex == 0)
+                    setOutVertex(0, borderVertexIndex+this.getBorderVertexCountAtLayer(layerIndex-1)*5-1, 0);
+                else
+                    setOutVertex(0, borderVertexIndex-1, 0);
+                setOutVertex(0, borderVertexIndex++, 1);
+
+                if(indexInEdge+1 == this.getFieldVertexCountAtLayer(layerIndex) &&
+                   (layerIndex > this.gpIndex*2 || (poleIndex == 4 && layerIndex > this.gpIndex))) {
+                    fieldTexcoord[0] += texcoordWidth;
+                    setOutVertex(0, borderVertexIndex++, 0);
                 }
+
+                ++fieldVertexIndex;
             }
+        }
+        console.log('layer', layerIndex, this.getBorderVertexIndex(0, layerIndex));
     }
+
+    for(var poleIndex = 0; poleIndex < 5; ++poleIndex) {
+        const indexInLayer = this.getFieldVertexCountAtLayer(this.gpIndex*3)*poleIndex, hexY = -1;
+        var hexX = this.gpIndex*poleIndex+1-this.gpIndex/2 + this.gpIndex-1;
+        generateTexcoord(fieldVertexIndex, hexX, hexY);
+        setOutVertex(0, borderVertexIndex+((poleIndex == 0) ? -2 : poleIndex*2-17), 0);
+        fieldTexcoord[0] += texcoordWidth*0.5;
+        fieldTexcoord[1] -= texcoordHeight*0.25;
+        setOutVertex(0, borderVertexIndex+((poleIndex == 0) ? 4 : -1), 0);
+        fieldTexcoord[0] += texcoordWidth*0.5;
+        fieldTexcoord[1] += texcoordHeight*0.25;
+        setOutVertex(0, borderVertexIndex++, 0);
+    }
+
+
+
+    // TODO: Generate pole caps
 };
