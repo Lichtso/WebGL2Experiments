@@ -1,22 +1,21 @@
 const linearAlgebra = require('./gl-matrix/src/gl-matrix.js');
 
-exports.IcosahedralClass1GoldbergPolyhedron = function(gl, ctx, gpIndex) {
-    this.edgeLength = 0.5;
-    this.texcoordEdgeLength = 25;
-    this.gl = gl;
+exports.IcosahedralClass1GoldbergPolyhedron = function(gl, gpIndex) {
+    this.edgeLength3d = 0.5;
+    this.edgeLength2d = 25;
+    this.roundSurface = true;
     this.gpIndex = gpIndex;
-    this.generateGeometry();
-    this.generateTopology(ctx);
 
-    // Generate WebGL buffers
+    this.gl = gl;
     this.vertexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.positions, gl.STATIC_DRAW);
+    this.elementBuffer = gl.createBuffer();
+    this.generateGeometry();
+    this.generateTopology();
 };
 
 const prototype = exports.IcosahedralClass1GoldbergPolyhedron.prototype;
 
-prototype.getFieldVertexCountAtLayer = function(layerIndex) {
+prototype.getFieldVertexCountPerEdgeAtLayer = function(layerIndex) {
     if(layerIndex < this.gpIndex)
         return layerIndex;
     else if(layerIndex <= this.gpIndex*2)
@@ -24,12 +23,17 @@ prototype.getFieldVertexCountAtLayer = function(layerIndex) {
     return this.gpIndex*3-layerIndex;
 };
 
-prototype.getBorderVertexCountAtLayer = function(layerIndex) {
+prototype.getBorderVertexCountPerEdgeAtLayer = function(layerIndex) {
     if(layerIndex < this.gpIndex)
         return layerIndex*2+1;
     else if(layerIndex < this.gpIndex*2)
         return this.gpIndex*2;
     return (this.gpIndex*3-layerIndex)*2-1;
+};
+
+prototype.getFieldVertexCountAtLayer = function(layerIndex) {
+    return (layerIndex == 0 || layerIndex == this.gpIndex*3)
+        ? 1 : this.getFieldVertexCountPerEdgeAtLayer(layerIndex)*5;
 };
 
 prototype.getFieldVertexIndex = function(indexInLayer, layerIndex) {
@@ -67,19 +71,30 @@ prototype.getVertexPosition = function(indexInLayer, layerIndex) {
 };
 
 prototype.wrapIndexInLayer = function(indexInLayer, layerIndex) {
-    return (layerIndex == 0 || layerIndex == this.gpIndex*3) ? 0 : indexInLayer%(this.getFieldVertexCountAtLayer(layerIndex)*5);
+    return (layerIndex == 0 || layerIndex == this.gpIndex*3) ? 0 : indexInLayer%(this.getFieldVertexCountPerEdgeAtLayer(layerIndex)*5);
 };
 
 prototype.isPole = function(indexInLayer, layerIndex) {
-    const fieldVertexCountAtLayer = this.getFieldVertexCountAtLayer(layerIndex);
+    const fieldVertexCountAtLayer = this.getFieldVertexCountPerEdgeAtLayer(layerIndex);
     return (fieldVertexCountAtLayer == 0 || (layerIndex%this.gpIndex == 0 && indexInLayer%fieldVertexCountAtLayer == 0));
 };
 
 prototype.render = function() {
     const gl = this.gl;
-    gl.drawArrays(gl.POINTS, 0, this.fieldVertexCount);
-    gl.drawArrays(gl.LINE_STRIP, this.fieldVertexCount, this.borderVertexCount);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.elementBuffer);
+    gl.drawElements(gl.TRIANGLE_FAN, this.fieldVertexCount*((this.roundSurface) ? 9 : 7), gl.UNSIGNED_SHORT, 0);
 };
+
+prototype.cleanup = function() {
+    const gl = this.gl;
+    gl.deleteBuffer(this.vertexBuffer);
+    gl.deleteBuffer(this.elementBuffer);
+};
+
+const alpha = Math.sqrt(3),
+      beta = Math.sin(0.3*Math.PI)/Math.sin(0.4*Math.PI),
+      gamma = Math.sqrt(5/4);
 
 prototype.generateGeometry = function() {
     this.fieldVertexCount = this.gpIndex*this.gpIndex*10+2;
@@ -87,9 +102,8 @@ prototype.generateGeometry = function() {
     this.vertexCount = this.fieldVertexCount+this.borderVertexCount;
 
     // Generate 12 poles (icosahedron)
-    const gamma = Math.sqrt(5/4),
-          poleDistance = this.gpIndex*this.edgeLength*Math.sqrt(3),
-          sphereRadius = poleDistance*Math.sin(0.3*Math.PI)/Math.sin(0.4*Math.PI)*gamma,
+    const poleDistance = this.gpIndex*this.edgeLength3d*alpha,
+          sphereRadius = gamma*poleDistance*beta,
           southPole = linearAlgebra.vec3.fromValues(0, -gamma*poleDistance, 0),
           northPole = linearAlgebra.vec3.fromValues(0, gamma*poleDistance, 0),
           southernPoles = [], northernPoles = [];
@@ -131,7 +145,7 @@ prototype.generateGeometry = function() {
             ++poleAIndex;
         for(var i = 1; i < this.gpIndex+fillSecondEdge; ++i) {
             const layerIndex = poleALayer+(mode > 0 ? -i : i),
-                  indexInLayer = poleAIndex*this.getFieldVertexCountAtLayer(layerIndex)+((mode > 1) ? -i : 0);
+                  indexInLayer = poleAIndex*this.getFieldVertexCountPerEdgeAtLayer(layerIndex)+((mode > 1) ? -i : 0);
             for(var j = 0; j < i; ++j) {
                 linearAlgebra.vec3.scale(vecAB, dirAB, i);
                 linearAlgebra.vec3.scale(vecBC, dirBC, j);
@@ -167,7 +181,7 @@ prototype.generateGeometry = function() {
     }.bind(this);
     var borderVertexIndex = this.fieldVertexCount;
     for(var layerIndex = 0; layerIndex <= this.gpIndex*3; ++layerIndex) {
-        const borderVertexCountAtLayer = this.getBorderVertexCountAtLayer(layerIndex),
+        const borderVertexCountAtLayer = this.getBorderVertexCountPerEdgeAtLayer(layerIndex),
               hemiSphere = (layerIndex < this.gpIndex*2) ? 0 : 1;
         var lowerIndex = 0, upperIndex = 0,
             lowerFiledVertex = this.getVertexPosition(lowerIndex, layerIndex),
@@ -189,135 +203,266 @@ prototype.generateGeometry = function() {
     }
 };
 
-prototype.generateTopology = function(ctx) {
-    // Generate texcoords of field vertices (unwrapping)
-    this.texcoords = new Float32Array(this.fieldVertexCount*2);
-    const outVertices = new Float32Array((this.fieldVertexCount)*8),
-          texcoord = linearAlgebra.vec2.create(),
-          fieldTexcoord = linearAlgebra.vec2.create(),
-          texcoordHeight = this.texcoordEdgeLength*2,
-          texcoordWidth = texcoordHeight*Math.sqrt(3)/2,
-          texcoordDirS = linearAlgebra.vec2.fromValues(texcoordWidth, 0),
-          texcoordDirT = linearAlgebra.vec2.fromValues(texcoordWidth*0.5, texcoordHeight*3/4);
-    const generateTexcoord = function(vertexIndex, hexX, hexY) {
-        linearAlgebra.vec3.scale(fieldTexcoord, texcoordDirT, hexY);
-        fieldTexcoord[0] += hexX*texcoordWidth+50;
-        fieldTexcoord[1] += texcoordHeight*0.5+20; // TODO
-        vertexIndex *= 2;
-        this.texcoords[vertexIndex+0] = fieldTexcoord[0];
-        this.texcoords[vertexIndex+1] = fieldTexcoord[1];
+prototype.generateTopology = function() {
+    // Generate element indices
+    const elementsPerFieldVertex = (this.roundSurface) ? 9 : 7,
+          glElementBuffer = new Uint16Array(this.fieldVertexCount*elementsPerFieldVertex),
+          primitiveRestartIndex = 65535;
+    const getElementCountAtLayer = function(layerIndex) {
+        var result;
+        if(layerIndex < this.gpIndex)
+            result = layerIndex*10+5;
+        else if(layerIndex <= this.gpIndex*2) {
+            result = this.gpIndex*10;
+            if(layerIndex > this.gpIndex && layerIndex < this.gpIndex*2)
+                result += (layerIndex+1 == this.gpIndex*2) ? 1 : 2;
+        } else
+            result = (this.gpIndex*3-layerIndex)*10+5;
+        return result;
     }.bind(this);
-    var outVertexIndex = 0;
-    const setOutVertex = function(TODO_outVertexIndex, vertexIndex, direction) {
-        linearAlgebra.vec2.copy(texcoord, fieldTexcoord);
-        switch(direction) {
-            case 0:
-                texcoord[1] += texcoordHeight*0.5;
-                break;
-            case 1:
-                texcoord[0] += texcoordWidth*0.5;
-                texcoord[1] += texcoordHeight*0.25;
-                break;
-        }
-        if(direction < 2) {
-            if(vertexIndex == undefined)
-                ctx.fillRect(texcoord[0]-1, texcoord[1]-1, 3, 3);
-            else
-                ctx.fillText(vertexIndex, texcoord[0]-10, texcoord[1]+3);
-            ++outVertexIndex;
-        }
+    const getElementOffsetAtLayer = function(layerIndex, poleIndex, elementCountAtLayer) {
+        var result = elementCountAtLayer;
+        if(layerIndex < this.gpIndex-1)
+            result += poleIndex*2;
+        else if(layerIndex == this.gpIndex-1)
+            result += poleIndex-1;
+        else if(layerIndex == this.gpIndex)
+            ++result;
+        else if(layerIndex == this.gpIndex*2+1)
+            result += (4-poleIndex);
+        else if(layerIndex > this.gpIndex*2+1)
+            result += (4-poleIndex)*2;
+        return result;
+    }.bind(this);
+    const generatePentagonElements = function() {
+        var outElementOffset = fieldVertexIndex*elementsPerFieldVertex;
+        if(this.roundSurface)
+            glElementBuffer[outElementOffset+0] = fieldVertexIndex;
+        else
+            --outElementOffset;
+        for(var i = 0; i < 5; ++i)
+            glElementBuffer[outElementOffset+i+1] = pentagonVertexOffset+i;
+        glElementBuffer[outElementOffset+6] = glElementBuffer[outElementOffset+1];
+        if(this.roundSurface)
+            glElementBuffer[outElementOffset+0] = fieldVertexIndex;
+        else
+            --outElementOffset;
+        glElementBuffer[outElementOffset+8] = primitiveRestartIndex;
+    }.bind(this);
+    const generateHexagonElements = function(elementOffsetAtLayer) {
+        var outElementOffset = fieldVertexIndex*elementsPerFieldVertex;
+        if(this.roundSurface)
+            glElementBuffer[outElementOffset+0] = fieldVertexIndex;
+        else
+            --outElementOffset;
+        glElementBuffer[outElementOffset+1] = outVertexIndex-1;
+        glElementBuffer[outElementOffset+2] = outVertexIndex;
+        glElementBuffer[outElementOffset+3] = outVertexIndex+1;
+        glElementBuffer[outElementOffset+4] = outVertexIndex+elementOffsetAtLayer+2;
+        glElementBuffer[outElementOffset+5] = outVertexIndex+elementOffsetAtLayer+1;
+        glElementBuffer[outElementOffset+6] = outVertexIndex+elementOffsetAtLayer;
+        if(this.roundSurface)
+            glElementBuffer[outElementOffset+7] = outVertexIndex-1;
+        else
+            --outElementOffset;
+        glElementBuffer[outElementOffset+8] = primitiveRestartIndex;
+    }.bind(this);
 
-        /*outVertexIndex = outVertexIndex*8;
+    // Generate texcoords (UV unwrapping)
+    var fieldVertexIndex = 0,
+        borderVertexIndex = this.fieldVertexCount,
+        outVertexIndex = 0,
+        pentagonVertexOffset = 20*(this.gpIndex*this.gpIndex+this.gpIndex)+2*this.gpIndex-11;
+    if(this.roundSurface) {
+        outVertexIndex += this.fieldVertexCount;
+        pentagonVertexOffset += this.fieldVertexCount;
+    }
+    this.fieldVertexTexcoords = new Float32Array(this.fieldVertexCount*2);
+    this.texcoordHeight = this.edgeLength2d*2;
+    this.texcoordWidth = this.texcoordHeight*alpha*0.5;
+    this.texcoordPentagonRadius = this.edgeLength2d*beta;
+    this.textureWidth = Math.ceil(this.texcoordWidth*(this.gpIndex*5.5-0.5)),
+    this.textureHeight = Math.ceil(this.texcoordHeight*(this.gpIndex*2.25-0.5));
+    const texcoord = linearAlgebra.vec2.create(),
+          fieldVertexTexcoord = linearAlgebra.vec2.create(),
+          texcoordDiagonal = linearAlgebra.vec2.fromValues(this.texcoordWidth*0.5, this.texcoordHeight*3/4);
+    const generateTexcoord = function(hexX, hexY) {
+        linearAlgebra.vec3.scale(fieldVertexTexcoord, texcoordDiagonal, hexY);
+        fieldVertexTexcoord[0] += hexX*this.texcoordWidth;
+        fieldVertexTexcoord[1] += this.texcoordHeight*0.5;
+        const vertexOffset = fieldVertexIndex*2;
+        this.fieldVertexTexcoords[vertexOffset+0] = fieldVertexTexcoord[0];
+        this.fieldVertexTexcoords[vertexOffset+1] = fieldVertexTexcoord[1];
+    }.bind(this);
+
+    // Copy and interleave vertices
+    const glVertexBuffer = new Float32Array((pentagonVertexOffset+12*5)*8);
+    const generateVertex = function(vertexIndex, direction) {
+        linearAlgebra.vec2.copy(texcoord, fieldVertexTexcoord);
+        if(direction < 5) {
+            var angle = Math.PI*2/5*direction+((fieldVertexIndex < this.fieldVertexCount/2) ? Math.PI*0.2 : 0);
+            texcoord[0] += Math.sin(angle)*this.texcoordPentagonRadius;
+            texcoord[1] += Math.cos(angle)*this.texcoordPentagonRadius;
+        } else switch(direction) {
+            case 5:
+                texcoord[1] += this.texcoordHeight*0.5;
+                break;
+            case 6:
+                texcoord[0] += this.texcoordWidth*0.5;
+                texcoord[1] += this.texcoordHeight*0.25;
+                break;
+        }
+        var outVertexOffset;
+        if(direction < 5)
+            outVertexOffset = pentagonVertexOffset++;
+        else if(direction < 7)
+            outVertexOffset = outVertexIndex++;
+        else {
+            if(!this.roundSurface)
+                return;
+            outVertexOffset = vertexIndex;
+        }
+        outVertexOffset *= 8;
         vertexIndex *= 3;
-        outVertices[outVertexIndex+0] = this.positions[vertexIndex+0];
-        outVertices[outVertexIndex+1] = this.positions[vertexIndex+1];
-        outVertices[outVertexIndex+2] = this.positions[vertexIndex+2];
-        outVertices[outVertexIndex+3] = this.normals[vertexIndex+0];
-        outVertices[outVertexIndex+4] = this.normals[vertexIndex+1];
-        outVertices[outVertexIndex+5] = this.normals[vertexIndex+2];
-        outVertices[outVertexIndex+6] = texcoord[0];
-        outVertices[outVertexIndex+7] = texcoord[1];*/
+        glVertexBuffer[outVertexOffset+0] = this.positions[vertexIndex+0];
+        glVertexBuffer[outVertexOffset+1] = this.positions[vertexIndex+1];
+        glVertexBuffer[outVertexOffset+2] = this.positions[vertexIndex+2];
+        glVertexBuffer[outVertexOffset+3] = this.normals[vertexIndex+0];
+        glVertexBuffer[outVertexOffset+4] = this.normals[vertexIndex+1];
+        glVertexBuffer[outVertexOffset+5] = this.normals[vertexIndex+2];
+        glVertexBuffer[outVertexOffset+6] = texcoord[0]/this.textureWidth;
+        glVertexBuffer[outVertexOffset+7] = texcoord[1]/this.textureHeight;
+    }.bind(this);
+    const generatePentagonVertices = function(layerIndex, poleIndex, elementOffsetAtLayer, borderVertexCountAtLayer0) {
+        const shiftEast = (layerIndex == this.gpIndex*2 && poleIndex == 0);
+        if(shiftEast) {
+            fieldVertexTexcoord[0] += this.texcoordWidth*this.gpIndex*5;
+            this.fieldVertexTexcoords[fieldVertexIndex*2] = fieldVertexTexcoord[0];
+        }
+        generatePentagonElements();
+        if(layerIndex == 0)
+            for(var i = 0; i < 5; ++i)
+                generateVertex(borderVertexIndex+i, i);
+        else if(layerIndex == this.gpIndex*3)
+            for(var i = 0; i < 5; ++i)
+                generateVertex(borderVertexIndex-5+i, i);
+        else if(poleIndex == 0) {
+            if(layerIndex == this.gpIndex) {
+                generateVertex(borderVertexIndex, 0);
+                generateVertex(borderVertexIndex+elementOffsetAtLayer-5, 1);
+                generateVertex(borderVertexIndex+elementOffsetAtLayer-6, 2);
+                generateVertex(borderVertexIndex+elementOffsetAtLayer+borderVertexCountAtLayer0-7, 3);
+                generateVertex(borderVertexIndex+elementOffsetAtLayer-7, 4);
+            } else {
+                generateVertex(borderVertexIndex+elementOffsetAtLayer-1, 0);
+                generateVertex(borderVertexIndex, 1);
+                generateVertex(borderVertexIndex+elementOffsetAtLayer, 2);
+                generateVertex(borderVertexIndex+elementOffsetAtLayer+borderVertexCountAtLayer0-1, 3);
+                generateVertex(borderVertexIndex+elementOffsetAtLayer-2, 4);
+            }
+        } else {
+            generateVertex(borderVertexIndex, 0);
+            if(layerIndex == this.gpIndex) {
+                elementOffsetAtLayer += poleIndex;
+                generateVertex(borderVertexIndex+elementOffsetAtLayer-5, 1);
+                generateVertex(borderVertexIndex+elementOffsetAtLayer-6, 2);
+                generateVertex(borderVertexIndex+elementOffsetAtLayer-7, 3);
+            } else {
+                elementOffsetAtLayer -= poleIndex;
+                generateVertex(borderVertexIndex+1, 1);
+                generateVertex(borderVertexIndex+elementOffsetAtLayer+1, 2);
+                generateVertex(borderVertexIndex+elementOffsetAtLayer, 3);
+            }
+            generateVertex(borderVertexIndex-1, 4);
+        }
+        generateVertex(fieldVertexIndex++, 7);
+        if(shiftEast)
+            fieldVertexTexcoord[0] -= this.texcoordWidth*this.gpIndex*5;
     }.bind(this);
 
-    var fieldVertexIndex = 1, borderVertexIndex = 0; // this.fieldVertexCount;
+    // Combination loops
+    generateTexcoord(0.5-this.gpIndex, this.gpIndex*2);
+    generatePentagonVertices(0);
     for(var layerIndex = 1; layerIndex < this.gpIndex*3; ++layerIndex) {
         const hexY = this.gpIndex*3-layerIndex-1,
-              borderVertexCountAtLayer0 = this.getBorderVertexCountAtLayer(layerIndex),
-              borderVertexCountAtLayer1 = this.getBorderVertexCountAtLayer(layerIndex-1),
-              borderVertexCountAtLayer2 = this.getBorderVertexCountAtLayer(layerIndex-2);
+              fieldVertexCountAtLayer = this.getFieldVertexCountPerEdgeAtLayer(layerIndex),
+              borderVertexCountAtLayer0 = this.getBorderVertexCountPerEdgeAtLayer(layerIndex)*5,
+              borderVertexCountAtLayer1 = this.getBorderVertexCountPerEdgeAtLayer(layerIndex-1),
+              borderVertexCountAtLayer2 = this.getBorderVertexCountPerEdgeAtLayer(layerIndex-2),
+              elementCountAtLayer = getElementCountAtLayer(layerIndex);
         for(var poleIndex = 0; poleIndex < 5; ++poleIndex) {
-            for(var indexInEdge = 0; indexInEdge < this.getFieldVertexCountAtLayer(layerIndex); ++indexInEdge) {
-                const indexInLayer = this.getFieldVertexCountAtLayer(layerIndex)*poleIndex+indexInEdge;
-                var hexX = indexInEdge+this.gpIndex*poleIndex+1-this.gpIndex/2;
+            const elementOffsetAtLayer = getElementOffsetAtLayer(layerIndex, poleIndex, elementCountAtLayer);
+            for(var indexInEdge = 0; indexInEdge < fieldVertexCountAtLayer; ++indexInEdge) {
+                const indexInLayer = fieldVertexCountAtLayer*poleIndex+indexInEdge,
+                      isNotPole = (indexInEdge > 0 || layerIndex%this.gpIndex > 0);
+                var hexX = indexInEdge+this.gpIndex*poleIndex-this.gpIndex/2+0.5;
                 if(layerIndex > this.gpIndex*2)
                     hexX += layerIndex-this.gpIndex*2;
-                generateTexcoord(fieldVertexIndex, hexX, hexY);
-                if(this.isPole(indexInLayer, layerIndex))
-                    ctx.fillStyle = 'red';
-                ctx.fillText(indexInLayer+','+layerIndex, fieldTexcoord[0]-10, fieldTexcoord[1]+3);
-                ctx.fillStyle = 'black';
-                setOutVertex(0, fieldVertexIndex, 2);
-
+                generateTexcoord(hexX, hexY);
                 if(indexInEdge == 0 && (poleIndex == 0 || layerIndex < this.gpIndex || layerIndex > this.gpIndex*2)) {
-                    fieldTexcoord[0] -= texcoordWidth;
+                    fieldVertexTexcoord[0] -= this.texcoordWidth;
                     if(layerIndex > this.gpIndex*2+1) {
-                        if(poleIndex == 0)
-                            setOutVertex(0, borderVertexIndex-2, 0);
-                        else
-                            setOutVertex(0, borderVertexIndex-borderVertexCountAtLayer2*(5-poleIndex)-borderVertexCountAtLayer1*poleIndex-2, 0);
-
+                        generateVertex((poleIndex == 0)
+                            ? borderVertexIndex-2
+                            : borderVertexIndex-borderVertexCountAtLayer2*(5-poleIndex)-borderVertexCountAtLayer1*poleIndex-2
+                        , 5);
                     }
-
-                    if(poleIndex > 0 || layerIndex%this.gpIndex > 0) {
+                    if(isNotPole) {
+                        var vertexIndex;
                         if(layerIndex > this.gpIndex*2)
-                            setOutVertex(0, (poleIndex == 0) ? borderVertexIndex+borderVertexCountAtLayer1*5-1 : borderVertexIndex-1, 1);
+                            vertexIndex = (poleIndex == 0) ? borderVertexIndex+borderVertexCountAtLayer1*5-1 : borderVertexIndex-1;
                         else if(layerIndex > this.gpIndex)
-                            setOutVertex(0, borderVertexIndex+borderVertexCountAtLayer1*5-2, 1);
+                            vertexIndex = borderVertexIndex+borderVertexCountAtLayer1*5-2;
                         else if(poleIndex == 0)
-                            setOutVertex(0, borderVertexIndex+(borderVertexCountAtLayer1+borderVertexCountAtLayer0)*5-2, 1);
+                            vertexIndex = borderVertexIndex+borderVertexCountAtLayer1*5+borderVertexCountAtLayer0-2;
                         else
-                            setOutVertex(0, borderVertexIndex+borderVertexCountAtLayer0*5-(6-poleIndex)*2, 1);
+                            vertexIndex = borderVertexIndex+borderVertexCountAtLayer0-(6-poleIndex)*2;
+                        generateVertex(vertexIndex, 6);
                     }
-
-                    fieldTexcoord[0] += texcoordWidth;
+                    fieldVertexTexcoord[0] += this.texcoordWidth;
                 }
-
+                if(isNotPole) {
+                    generateHexagonElements(elementOffsetAtLayer);
+                    generateVertex(fieldVertexIndex++, 7);
+                } else
+                    generatePentagonVertices(layerIndex, poleIndex, elementOffsetAtLayer, borderVertexCountAtLayer0);
+                var vertexIndex;
                 if(indexInEdge > 0 ||
                    (poleIndex == 0 && layerIndex > this.gpIndex*2) ||
                    (poleIndex > 0 && layerIndex > this.gpIndex))
-                    setOutVertex(0, borderVertexIndex++, 0);
+                    vertexIndex = borderVertexIndex++;
                 else if(poleIndex == 0)
-                    setOutVertex(0, borderVertexIndex+this.getBorderVertexCountAtLayer(layerIndex-1)*5-1, 0);
+                    vertexIndex = borderVertexIndex+borderVertexCountAtLayer1*5-1;
                 else
-                    setOutVertex(0, borderVertexIndex-1, 0);
-                setOutVertex(0, borderVertexIndex++, 1);
-
-                if(indexInEdge+1 == this.getFieldVertexCountAtLayer(layerIndex) &&
+                    vertexIndex = borderVertexIndex-1;
+                generateVertex(vertexIndex, 5);
+                generateVertex(borderVertexIndex++, 6);
+                if(indexInEdge+1 == fieldVertexCountAtLayer &&
                    (layerIndex > this.gpIndex*2 || (poleIndex == 4 && layerIndex > this.gpIndex))) {
-                    fieldTexcoord[0] += texcoordWidth;
-                    setOutVertex(0, borderVertexIndex++, 0);
+                    fieldVertexTexcoord[0] += this.texcoordWidth;
+                    generateVertex(borderVertexIndex++, 5);
                 }
-
-                ++fieldVertexIndex;
             }
         }
-        console.log('layer', layerIndex, this.getBorderVertexIndex(0, layerIndex));
     }
-
     for(var poleIndex = 0; poleIndex < 5; ++poleIndex) {
-        const indexInLayer = this.getFieldVertexCountAtLayer(this.gpIndex*3)*poleIndex, hexY = -1;
-        var hexX = this.gpIndex*poleIndex+1-this.gpIndex/2 + this.gpIndex-1;
-        generateTexcoord(fieldVertexIndex, hexX, hexY);
-        setOutVertex(0, borderVertexIndex+((poleIndex == 0) ? -2 : poleIndex*2-17), 0);
-        fieldTexcoord[0] += texcoordWidth*0.5;
-        fieldTexcoord[1] -= texcoordHeight*0.25;
-        setOutVertex(0, borderVertexIndex+((poleIndex == 0) ? 4 : -1), 0);
-        fieldTexcoord[0] += texcoordWidth*0.5;
-        fieldTexcoord[1] += texcoordHeight*0.25;
-        setOutVertex(0, borderVertexIndex++, 0);
+        var hexX = this.gpIndex*poleIndex-this.gpIndex/2+0.5 + this.gpIndex-1;
+        generateTexcoord(hexX, -1);
+        generateVertex(borderVertexIndex+((poleIndex == 0) ? -2 : poleIndex*2-17), 5);
+        fieldVertexTexcoord[0] += this.texcoordWidth*0.5;
+        fieldVertexTexcoord[1] -= this.texcoordHeight*0.25;
+        generateVertex(borderVertexIndex+((poleIndex == 0) ? 4 : -1), 5);
+        fieldVertexTexcoord[0] += this.texcoordWidth*0.5;
+        fieldVertexTexcoord[1] += this.texcoordHeight*0.25;
+        generateVertex(borderVertexIndex++, 5);
     }
+    generateTexcoord(this.gpIndex*5, this.gpIndex-2);
+    generatePentagonVertices(this.gpIndex*3);
 
-
-
-    // TODO: Generate pole caps
+    // Generate WebGL buffers
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, glVertexBuffer, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.elementBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, glElementBuffer, gl.STATIC_DRAW);
 };
