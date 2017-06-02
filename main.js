@@ -1,100 +1,91 @@
-function createShader(type, source) {
-    const shader = gl.createShader(type);
-    if(type == gl.FRAGMENT_SHADER)
-        source = 'precision mediump float;\n'+source;
-    gl.shaderSource(shader, '#version 300 es\n'+source);
-    gl.compileShader(shader);
-    if(gl.getShaderParameter(shader, gl.COMPILE_STATUS))
-        return shader;
-    console.log(gl.getShaderInfoLog(shader));
-    gl.deleteShader(shader);
+const linearAlgebra = require('./gl-matrix/src/gl-matrix.js'),
+      geometry = require('./geometry.js'),
+      RenderEngine = require('./RenderEngine.js'),
+      RenderContext = new RenderEngine.RenderContext(document.getElementById('canvas')),
+      svgElement = document.getElementById('svg'),
+      ctx = document.createElement('canvas').getContext('2d'),
+      polyhedron = new geometry.IcosahedralClass1GoldbergPolyhedron(RenderContext, 10),
+      texture = RenderContext.createTexture(RenderContext.gl.LINEAR_MIPMAP_LINEAR, RenderContext.gl.LINEAR),
+      camera = new RenderEngine.Camera(),
+      worldMatrix = linearAlgebra.mat4.create();
+camera.setOrtho(10, 10);
+camera.update();
+var rotation = 0;
+RenderContext.render = function(deltaTime) {
+    rotation += 0.1*deltaTime;
+    linearAlgebra.mat4.fromYRotation(worldMatrix, rotation);
+    RenderContext.gl.uniformMatrix4fv(RenderContext.gl.getUniformLocation(RenderContext.program, 'worldMatrix'), false, worldMatrix);
+    RenderContext.gl.uniformMatrix4fv(RenderContext.gl.getUniformLocation(RenderContext.program, 'projectionMatrix'), false, camera.combinedMatrix);
+    RenderContext.bindTexture(0, texture);
+    polyhedron.render();
+};
+
+function generateSvgElement(tag) {
+    return document.createElementNS('http://www.w3.org/2000/svg', tag);
 }
 
-function createProgram(shaders) {
-    const program = gl.createProgram();
-    for(const shader of shaders)
-        gl.attachShader(program, shader);
-    gl.linkProgram(program);
-    if(gl.getProgramParameter(program, gl.LINK_STATUS))
-        return program;
-    console.log(gl.getProgramInfoLog(program));
-    gl.deleteProgram(program);
-}
-
-const vertexShaderSource = `
-uniform mat4 positionMat;
-uniform mat4 projectionMat;
-layout(location=0) in vec4 vPosition;
-layout(location=1) in vec3 vNormal;
-layout(location=2) in vec2 vTexcoord;
-out vec3 fPosition;
-out vec3 fNormal;
-out vec2 fTexcoord;
-
-void main() {
-    mat3 normalTransform = mat3(
-        positionMat[0].xyz,
-        positionMat[1].xyz,
-        positionMat[2].xyz
+ctx.canvas.width = polyhedron.textureWidth*devicePixelRatio;
+ctx.canvas.height = polyhedron.textureHeight*devicePixelRatio;
+function generateTexture() {
+    svgElement.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    svgElement.setAttribute('width', polyhedron.textureWidth);
+    svgElement.setAttribute('height', polyhedron.textureHeight);
+    svgElement.setAttribute('text-anchor', 'middle');
+    svgElement.setAttribute('font-family', 'Helvetica');
+    svgElement.setAttribute('font-size', '12');
+    const defs = generateSvgElement('defs'),
+          pentagonElement = generateSvgElement('path'),
+          hexagonElement = generateSvgElement('path'),
+          fieldLayer = generateSvgElement('g'),
+          coordinateLayer = generateSvgElement('g');
+    var path = '';
+    for(var i = 0; i < 5; ++i) {
+        const angle = Math.PI*2/5*i;
+        path += (i == 0) ? 'M' : 'L';
+        path += Math.round(Math.sin(angle)*polyhedron.texcoordPentagonRadius)+','+Math.round(Math.cos(angle)*polyhedron.texcoordPentagonRadius);
+    }
+    pentagonElement.setAttribute('id', 'pentagon');
+    pentagonElement.setAttribute('d', path+'Z');
+    defs.appendChild(pentagonElement);
+    hexagonElement.setAttribute('id', 'hexagon');
+    hexagonElement.setAttribute('d',
+        'M'+Math.ceil(polyhedron.texcoordWidth*0.5)+','+Math.ceil(polyhedron.texcoordHeight*0.25)+
+        'L'+Math.ceil(polyhedron.texcoordWidth*0.5)+','+Math.floor(-polyhedron.texcoordHeight*0.25)+
+        'L0,'+Math.floor(-polyhedron.texcoordHeight*0.5)+
+        'L'+Math.floor(-polyhedron.texcoordWidth*0.5)+','+Math.floor(-polyhedron.texcoordHeight*0.25)+
+        'L'+Math.floor(-polyhedron.texcoordWidth*0.5)+','+Math.ceil(polyhedron.texcoordHeight*0.25)+
+        'L0,'+Math.ceil(polyhedron.texcoordHeight*0.5)+
+        'Z'
     );
-    gl_Position = projectionMat*vPosition;
-    fPosition = (positionMat*vPosition).xyz;
-    fNormal = normalTransform*vNormal;
-    fTexcoord = vTexcoord;
-}`;
-
-const fragmentShaderSource = `
-uniform sampler2D colorMap;
-in vec3 fPosition;
-in vec3 fNormal;
-in vec2 fTexcoord;
-out vec4 outColor;
-
-void main() {
-    outColor = texture(colorMap, fTexcoord);
-    vec3 lightVector = normalize(vec3(-1.0, 1.0, 2.0));
-    outColor.rgb *= clamp(pow(1024.0, dot(fNormal, lightVector))-1.0, 0.5, 1.0);
-}`;
-
-const geometry = require('./geometry.js'),
-      linearAlgebra = require('./gl-matrix/src/gl-matrix.js')
-      canvas3d = document.getElementById('canvas'),
-      canvas2d = document.createElement('canvas'),
-      devicePixelRatio = window.devicePixelRatio || 1,
-      desiredWidth = 512, desiredHeight = 512;
-canvas3d.style.width = desiredWidth+'px';
-canvas3d.style.height = desiredHeight+'px';
-canvas3d.width = Math.round(desiredWidth*devicePixelRatio);
-canvas3d.height = Math.round(desiredHeight*devicePixelRatio);
-const ctx = canvas2d.getContext('2d'),
-      gl = canvas3d.getContext('webgl2');
-if(!gl) {
-    console.log('WebGL 2 not supported');
-}
-gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-gl.clearColor(0, 0, 0, 1);
-gl.enable(gl.CULL_FACE);
-gl.enable(gl.DEPTH_TEST);
-gl.depthFunc(gl.LESS);
-
-const vertexShader = createShader(gl.VERTEX_SHADER, vertexShaderSource),
-      fragmentShader = createShader(gl.FRAGMENT_SHADER, fragmentShaderSource),
-      program = createProgram([vertexShader, fragmentShader]),
-      projectionMat = linearAlgebra.mat4.create(),
-      camSize = 10;
-linearAlgebra.mat4.ortho(projectionMat, -camSize, camSize, -camSize, camSize, 1, 100);
-linearAlgebra.mat4.translate(projectionMat, projectionMat, [0, 0, -25]);
-
-const polyhedron = new geometry.IcosahedralClass1GoldbergPolyhedron(gl, 10);
-const positionAttributeLocation = gl.getAttribLocation(program, 'vPosition'),
-      normalAttributeLocation = gl.getAttribLocation(program, 'vNormal'),
-      texcoordAttributeLocation = gl.getAttribLocation(program, 'vTexcoord'),
-      vertexArray = gl.createVertexArray();
-gl.useProgram(program);
-gl.bindVertexArray(vertexArray);
-gl.enableVertexAttribArray(positionAttributeLocation);
-gl.vertexAttribPointer(positionAttributeLocation, 3, gl.FLOAT, false, 8*4, 0*4);
-gl.enableVertexAttribArray(normalAttributeLocation);
-gl.vertexAttribPointer(normalAttributeLocation, 3, gl.FLOAT, false, 8*4, 3*4);
-gl.enableVertexAttribArray(texcoordAttributeLocation);
-gl.vertexAttribPointer(texcoordAttributeLocation, 2, gl.FLOAT, false, 8*4, 6*4);
+    defs.appendChild(hexagonElement);
+    svgElement.appendChild(defs);
+    svgElement.appendChild(fieldLayer);
+    svgElement.appendChild(coordinateLayer);
+    fieldLayer.onclick = function() {
+        coordinateLayer.setAttribute('opacity', (coordinateLayer.getAttribute('opacity') != 0) ? 0 : 1);
+        RenderContext.renderImageToTexture(svgElement, texture);
+    };
+    for(var layerIndex = polyhedron.gpIndex*3; layerIndex >= 0; --layerIndex)
+        for(var indexInLayer = 0; indexInLayer < polyhedron.getFieldVertexCountAtLayer(layerIndex); ++indexInLayer) {
+            const fieldVertexIndex = polyhedron.getFieldVertexIndex(indexInLayer, layerIndex),
+                  vertexOffset = fieldVertexIndex*2,
+                  isPole = polyhedron.isPole(indexInLayer, layerIndex),
+                  posX = Math.round(polyhedron.fieldVertexTexcoords[vertexOffset+0]),
+                  posY = Math.round(polyhedron.fieldVertexTexcoords[vertexOffset+1]),
+                  pixelIndex = (posY*devicePixelRatio*ctx.canvas.width+posX*devicePixelRatio)*4,
+                  useElement = generateSvgElement('use'),
+                  textElement = generateSvgElement('text');
+            if(isPole && fieldVertexIndex < polyhedron.fieldVertexCount/2)
+                useElement.setAttribute('transform', 'translate('+posX+','+posY+') rotate(36)');
+            else
+                useElement.setAttribute('transform', 'translate('+posX+','+posY+')');
+            useElement.setAttribute('fill', (Math.random() < 0.5) ? '#5E5' : '#3AF');
+            useElement.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', (isPole) ? '#pentagon' : '#hexagon');
+            fieldLayer.appendChild(useElement);
+            textElement.setAttribute('transform', 'translate('+posX+','+(posY+4)+')');
+            textElement.textContent = indexInLayer+' '+layerIndex;
+            coordinateLayer.appendChild(textElement);
+        }
+    RenderContext.renderImageToTexture(svgElement, texture);
+};
+generateTexture();

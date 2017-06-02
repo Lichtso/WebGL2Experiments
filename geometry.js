@@ -1,14 +1,12 @@
 const linearAlgebra = require('./gl-matrix/src/gl-matrix.js');
 
-exports.IcosahedralClass1GoldbergPolyhedron = function(gl, gpIndex) {
+exports.IcosahedralClass1GoldbergPolyhedron = function(RenderContext, gpIndex) {
     this.edgeLength3d = 0.5;
     this.edgeLength2d = 25;
     this.roundSurface = true;
     this.gpIndex = gpIndex;
 
-    this.gl = gl;
-    this.vertexBuffer = gl.createBuffer();
-    this.elementBuffer = gl.createBuffer();
+    this.RenderContext = RenderContext;
     this.generateGeometry();
     this.generateTopology();
 };
@@ -80,16 +78,12 @@ prototype.isPole = function(indexInLayer, layerIndex) {
 };
 
 prototype.render = function() {
-    const gl = this.gl;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.elementBuffer);
-    gl.drawElements(gl.TRIANGLE_FAN, this.fieldVertexCount*((this.roundSurface) ? 9 : 7), gl.UNSIGNED_SHORT, 0);
+    this.RenderContext.gl.bindVertexArray(this.vertexArray);
+    this.RenderContext.gl.drawElements(this.RenderContext.gl.TRIANGLE_FAN, this.fieldVertexCount*((this.roundSurface) ? 9 : 7), this.RenderContext.gl.UNSIGNED_SHORT, 0);
 };
 
 prototype.cleanup = function() {
-    const gl = this.gl;
-    gl.deleteBuffer(this.vertexBuffer);
-    gl.deleteBuffer(this.elementBuffer);
+    this.RenderContext.gl.deleteVertexArray(this.vertexArray);
 };
 
 const alpha = Math.sqrt(3),
@@ -459,10 +453,5 @@ prototype.generateTopology = function() {
     generateTexcoord(this.gpIndex*5, this.gpIndex-2);
     generatePentagonVertices(this.gpIndex*3);
 
-    // Generate WebGL buffers
-    const gl = this.gl;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, glVertexBuffer, gl.STATIC_DRAW);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.elementBuffer);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, glElementBuffer, gl.STATIC_DRAW);
+    this.vertexArray = this.RenderContext.createVertexArray(glVertexBuffer, glElementBuffer);
 };
