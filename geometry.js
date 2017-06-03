@@ -238,7 +238,7 @@ prototype.generateTopology = function() {
             glElementBuffer[outElementOffset+i+1] = pentagonVertexOffset+i;
         glElementBuffer[outElementOffset+6] = glElementBuffer[outElementOffset+1];
         if(this.roundSurface)
-            glElementBuffer[outElementOffset+0] = fieldVertexIndex;
+            glElementBuffer[outElementOffset+7] = fieldVertexIndex;
         else
             --outElementOffset;
         glElementBuffer[outElementOffset+8] = primitiveRestartIndex;
@@ -272,11 +272,11 @@ prototype.generateTopology = function() {
         pentagonVertexOffset += this.fieldVertexCount;
     }
     this.fieldVertexTexcoords = new Float32Array(this.fieldVertexCount*2);
-    this.texcoordHeight = this.edgeLength2d*2;
-    this.texcoordWidth = this.texcoordHeight*alpha*0.5;
+    this.texcoordHeight = Math.ceil(this.edgeLength2d)*2;
+    this.texcoordWidth = Math.ceil(this.edgeLength2d*alpha);
     this.texcoordPentagonRadius = this.edgeLength2d*beta;
-    this.textureWidth = Math.ceil(this.texcoordWidth*(this.gpIndex*5.5-0.5)),
-    this.textureHeight = Math.ceil(this.texcoordHeight*(this.gpIndex*2.25-0.5));
+    this.textureWidth = this.texcoordWidth*(this.gpIndex*5.5-0.5),
+    this.textureHeight = this.texcoordHeight*(this.gpIndex*2.25-0.5);
     const texcoord = linearAlgebra.vec2.create(),
           fieldVertexTexcoord = linearAlgebra.vec2.create(),
           texcoordDiagonal = linearAlgebra.vec2.fromValues(this.texcoordWidth*0.5, this.texcoordHeight*3/4);
@@ -335,7 +335,7 @@ prototype.generateTopology = function() {
         }
         generatePentagonElements();
         if(layerIndex == 0)
-            for(var i = 0; i < 5; ++i)
+            for(var i = 4; i >= 0; --i)
                 generateVertex(borderVertexIndex+i, i);
         else if(layerIndex == this.gpIndex*3)
             for(var i = 0; i < 5; ++i)
