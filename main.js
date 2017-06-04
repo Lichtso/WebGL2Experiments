@@ -7,23 +7,47 @@ const linearAlgebra = require('./gl-matrix/src/gl-matrix.js'),
       polyhedron = new geometry.IcosahedralClass1GoldbergPolyhedron(RenderContext, 10),
       texture = RenderContext.createTexture(RenderContext.gl.LINEAR_MIPMAP_LINEAR, RenderContext.gl.LINEAR),
       camera = new RenderEngine.Camera(),
-      worldMatrix = linearAlgebra.mat4.create();
+      rotationVelocity = linearAlgebra.quat.create(),
+      rotation = linearAlgebra.quat.create(),
+      worldMatrix = linearAlgebra.mat4.create(),
+      normalMatrix = linearAlgebra.mat3.create();
 camera.setOrtho(10, 10);
 camera.update();
-var rotation = 0;
 RenderContext.render = function(deltaTime) {
-    rotation += 0.1*deltaTime;
-    linearAlgebra.mat4.fromYRotation(worldMatrix, rotation);
+    linearAlgebra.quat.multiply(rotation, rotationVelocity, rotation);
+    const rotationAxis = linearAlgebra.vec3.create();
+    linearAlgebra.quat.setAxisAngle(rotationVelocity, rotationAxis, linearAlgebra.quat.getAxisAngle(rotationAxis, rotationVelocity)*deltaTime*50.0);
+    linearAlgebra.mat4.fromQuat(worldMatrix, rotation);
+    linearAlgebra.mat3.fromMat4(normalMatrix, worldMatrix);
     RenderContext.gl.uniformMatrix4fv(RenderContext.gl.getUniformLocation(RenderContext.program, 'worldMatrix'), false, worldMatrix);
+    RenderContext.gl.uniformMatrix3fv(RenderContext.gl.getUniformLocation(RenderContext.program, 'normalMatrix'), false, normalMatrix);
     RenderContext.gl.uniformMatrix4fv(RenderContext.gl.getUniformLocation(RenderContext.program, 'projectionMatrix'), false, camera.combinedMatrix);
     RenderContext.bindTexture(0, texture);
     polyhedron.render();
 };
 
+document.body.onkeydown = function(event) {
+    const deltaRotation = linearAlgebra.quat.create();
+    switch(event.key) {
+        case 'w':
+            linearAlgebra.quat.setAxisAngle(deltaRotation, [1, 0, 0], 0.1);
+            break;
+        case 's':
+            linearAlgebra.quat.setAxisAngle(deltaRotation, [1, 0, 0], -0.1);
+            break;
+        case 'a':
+            linearAlgebra.quat.setAxisAngle(deltaRotation, [0, 0, 1], -0.1);
+            break;
+        case 'd':
+            linearAlgebra.quat.setAxisAngle(deltaRotation, [0, 0, 1], 0.1);
+            break;
+    }
+    linearAlgebra.quat.multiply(rotationVelocity, deltaRotation, rotationVelocity);
+};
+
 function generateSvgElement(tag) {
     return document.createElementNS('http://www.w3.org/2000/svg', tag);
 }
-
 ctx.canvas.width = polyhedron.textureWidth*devicePixelRatio;
 ctx.canvas.height = polyhedron.textureHeight*devicePixelRatio;
 function generateTexture() {
@@ -33,6 +57,7 @@ function generateTexture() {
     svgElement.setAttribute('text-anchor', 'middle');
     svgElement.setAttribute('font-family', 'Helvetica');
     svgElement.setAttribute('font-size', '12');
+    svgElement.setAttribute('shape-rendering', 'crispEdges');
     const defs = generateSvgElement('defs'),
           pentagonElement = generateSvgElement('path'),
           hexagonElement = generateSvgElement('path'),
@@ -49,12 +74,12 @@ function generateTexture() {
     defs.appendChild(pentagonElement);
     hexagonElement.setAttribute('id', 'hexagon');
     hexagonElement.setAttribute('d',
-        'M'+Math.ceil(polyhedron.texcoordWidth*0.5)+','+Math.ceil(polyhedron.texcoordHeight*0.25)+
-        'L'+Math.ceil(polyhedron.texcoordWidth*0.5)+','+Math.floor(-polyhedron.texcoordHeight*0.25)+
-        'L0,'+Math.floor(-polyhedron.texcoordHeight*0.5)+
-        'L'+Math.floor(-polyhedron.texcoordWidth*0.5)+','+Math.floor(-polyhedron.texcoordHeight*0.25)+
-        'L'+Math.floor(-polyhedron.texcoordWidth*0.5)+','+Math.ceil(polyhedron.texcoordHeight*0.25)+
-        'L0,'+Math.ceil(polyhedron.texcoordHeight*0.5)+
+        'M'+(polyhedron.texcoordWidth*0.5)+','+(polyhedron.texcoordHeight*0.25)+
+        'L'+(polyhedron.texcoordWidth*0.5)+','+(-polyhedron.texcoordHeight*0.25)+
+        'L0,'+(-polyhedron.texcoordHeight*0.5)+
+        'L'+(-polyhedron.texcoordWidth*0.5)+','+(-polyhedron.texcoordHeight*0.25)+
+        'L'+(-polyhedron.texcoordWidth*0.5)+','+(polyhedron.texcoordHeight*0.25)+
+        'L0,'+(polyhedron.texcoordHeight*0.5)+
         'Z'
     );
     defs.appendChild(hexagonElement);
@@ -70,9 +95,9 @@ function generateTexture() {
             const fieldVertexIndex = polyhedron.getFieldVertexIndex(indexInLayer, layerIndex),
                   vertexOffset = fieldVertexIndex*2,
                   isPole = polyhedron.isPole(indexInLayer, layerIndex),
-                  posX = Math.round(polyhedron.fieldVertexTexcoords[vertexOffset+0]),
-                  posY = Math.round(polyhedron.fieldVertexTexcoords[vertexOffset+1]),
-                  pixelIndex = (posY*devicePixelRatio*ctx.canvas.width+posX*devicePixelRatio)*4,
+                  posX = polyhedron.fieldVertexTexcoords[vertexOffset+0],
+                  posY = polyhedron.fieldVertexTexcoords[vertexOffset+1],
+                  pixelIndex = (Math.round(posY)*devicePixelRatio*ctx.canvas.width+Math.round(posX)*devicePixelRatio)*4,
                   useElement = generateSvgElement('use'),
                   textElement = generateSvgElement('text');
             if(isPole && fieldVertexIndex < polyhedron.fieldVertexCount/2)
