@@ -1,4 +1,4 @@
-import * as linearAlgebra from './gl-matrix.js';
+import {mat4} from './gl-matrix.js';
 import * as FirstPassShader from './FirstPassShader.js';
 import * as LastPassShader from './LastPassShader.js';
 
@@ -53,16 +53,15 @@ export class RenderContext {
         this.firstPass = this.createProgram(FirstPassShader);
         this.lastPass = this.createProgram(LastPassShader);
 
-        let lastTime = 0;
+        let lastTime = performance.now();
         const step = (currentTime) => {
-            const deltaTime = (currentTime-lastTime)*0.001;
-            lastTime = currentTime;
             this.gl.enable(this.gl.CULL_FACE);
             this.gl.enable(this.gl.DEPTH_TEST);
             this.gl.useProgram(this.firstPass);
             this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, frameBuffer);
             this.gl.clear(this.gl.COLOR_BUFFER_BIT|this.gl.DEPTH_BUFFER_BIT);
-            this.render(deltaTime);
+            if(this.render)
+                this.render((currentTime-lastTime)*0.001);
             this.gl.disable(this.gl.CULL_FACE);
             this.gl.disable(this.gl.DEPTH_TEST);
             this.gl.useProgram(this.lastPass);
@@ -72,9 +71,10 @@ export class RenderContext {
             this.bindTexture(2, diffuseBuffer);
             this.gl.bindVertexArray(this.fullScreenVertexArray);
             this.gl.drawArrays(this.gl.TRIANGLE_FAN, 0, 4);
+            lastTime = currentTime;
             window.requestAnimationFrame(step);
         };
-        window.requestAnimationFrame(step);
+        step(lastTime);
     }
 
     createShader(type, source) {
@@ -198,25 +198,23 @@ export class RenderContext {
 
 export class Camera {
     constructor() {
-        this.near = 1;
-        this.far = 100;
-        this.worldMatrix = linearAlgebra.mat4.create();
-        this.viewMatrix = linearAlgebra.mat4.create();
-        this.projectionMatrix = linearAlgebra.mat4.create();
-        this.combinedMatrix = linearAlgebra.mat4.create();
-        linearAlgebra.mat4.translate(this.worldMatrix, this.worldMatrix, [0, 0, 25]);
+        this.near = 1.0;
+        this.far = 1000.0;
+        this.worldMatrix = mat4.create();
+        this.projectionMatrix = mat4.create();
+        this.combinedMatrix = mat4.create();
     }
 
     setPerspective(fov, aspect) {
-        linearAlgebra.mat4.perspective(this.projectionMatrix, fov, aspect, this.near, this.far);
+        mat4.perspective(this.projectionMatrix, fov, aspect, this.near, this.far);
     }
 
     setOrtho(width, height) {
-        linearAlgebra.mat4.ortho(this.projectionMatrix, -width, width, -height, height, this.near, this.far);
+        mat4.ortho(this.projectionMatrix, -width, width, -height, height, this.near, this.far);
     }
 
     update() {
-        linearAlgebra.mat4.invert(this.viewMatrix, this.worldMatrix);
-        linearAlgebra.mat4.multiply(this.combinedMatrix, this.projectionMatrix, this.viewMatrix);
+        mat4.invert(this.combinedMatrix, this.worldMatrix);
+        mat4.multiply(this.combinedMatrix, this.projectionMatrix, this.combinedMatrix);
     }
 }

@@ -10,8 +10,9 @@ out vec3 fNormal;
 out vec2 fTexcoord;
 
 void main() {
-    gl_Position = projectionMatrix*(worldMatrix*vPosition);
-    fPosition = (worldMatrix*vPosition).xyz;
+    vec4 positionInWorld = worldMatrix*vPosition;
+    gl_Position = projectionMatrix*positionInWorld;
+    fPosition = positionInWorld.xyz;
     fNormal = normalMatrix*vNormal;
     fTexcoord = vTexcoord;
 }`;
