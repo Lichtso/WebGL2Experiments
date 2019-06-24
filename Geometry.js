@@ -12,6 +12,37 @@ function vec3Slerp(out, a, b, t) {
     vec3.scale(out, aux, 1.0/Math.sqrt(1.0-cos*cos));
 }
 
+function createSvgElement(tag, parentNode) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    if(parentNode)
+        parentNode.appendChild(node);
+    return node;
+}
+
+const svgElement = createSvgElement('svg');
+svgElement.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+svgElement.setAttribute('text-anchor', 'middle');
+svgElement.setAttribute('font-family', 'Helvetica');
+svgElement.setAttribute('font-size', '12');
+const defs = createSvgElement('defs', svgElement),
+      outlineFilter = createSvgElement('filter', defs),
+      feMorphology = createSvgElement('feMorphology', outlineFilter),
+      feMerge = createSvgElement('feMerge', outlineFilter),
+      feMergeNodeA = createSvgElement('feMergeNode', feMerge),
+      feMergeNodeB = createSvgElement('feMergeNode', feMerge),
+      pentagonElement = createSvgElement('path', defs),
+      hexagonElement = createSvgElement('path', defs),
+      groundLayer = createSvgElement('g', svgElement),
+      gridLayer = createSvgElement('g', svgElement);
+outlineFilter.setAttribute('id', 'outlineFilter');
+feMorphology.setAttribute('id', 'SourceAlpha');
+feMorphology.setAttribute('result', 'dilated');
+feMorphology.setAttribute('operator', 'dilate');
+feMorphology.setAttribute('radius', '1');
+feMergeNodeA.setAttribute('in', 'dilated');
+feMergeNodeB.setAttribute('in', 'SourceGraphic');
+groundLayer.setAttribute('shape-rendering', 'crispEdges');
+
 export class IcosahedralClass1GoldbergPolyhedron {
     constructor(renderContext, abandon, fieldsHaveCenterVertex, gpIndex, edgeLength3D, edgeLength2D) {
         this.renderContext = renderContext;
@@ -21,13 +52,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
         this.edgeLength2D = edgeLength2D;
         this.fieldsHaveCenterVertex = fieldsHaveCenterVertex;
         this.generateGeometry();
-        this.generateTopology();
-    }
-
-    getFieldCountPerEdgeAtLayer(layerIndex) {
-        return (layerIndex < this.gpIndex) ? layerIndex :
-               (layerIndex <= this.gpIndex*2) ? this.gpIndex :
-               this.gpIndex*3-layerIndex;
+        this.generateTopologyAndTexcoords();
     }
 
     getBorderVertexCountPerEdgeAtLayer(layerIndex) {
@@ -36,11 +61,62 @@ export class IcosahedralClass1GoldbergPolyhedron {
                (this.gpIndex*3-layerIndex)*2-1;
     }
 
-    wrapIndexInLayer(indexInLayer, layerIndex) {
-        return (layerIndex == 0 || layerIndex == this.gpIndex*3) ? 0 : indexInLayer%(this.getFieldCountPerEdgeAtLayer(layerIndex)*5);
+    getFieldCountInStripeLayer(layerIndex) {
+        return (layerIndex < this.gpIndex) ? layerIndex :
+               (layerIndex <= this.gpIndex*2) ? this.gpIndex :
+               this.gpIndex*3-layerIndex;
     }
 
-    getFieldIndex(indexInLayer, layerIndex) {
+    getFieldCountInLayer(layerIndex) {
+        return (layerIndex == 0 || layerIndex == this.gpIndex*3) ? 1 :
+               this.getFieldCountInStripeLayer(layerIndex)*5;
+    }
+
+    wrapIndexInLayer(indexInLayer, layerIndex) {
+        return indexInLayer%this.getFieldCountInLayer(layerIndex);
+    }
+
+    isPole(indexInStripeLayer, layerIndex) {
+        return (indexInStripeLayer == 0 && layerIndex%this.gpIndex == 0);
+    }
+
+    indexInLayerToIndexInStripeLayerAndStripeIndex(indexInLayer, layerIndex) {
+        if(layerIndex == 0 || layerIndex == this.gpIndex*3)
+            return [0, 0];
+        const fieldCountInStripeLayer = this.getFieldCountInStripeLayer(layerIndex),
+              indexInStripeLayer = indexInLayer%fieldCountInStripeLayer,
+              stripeIndex = Math.floor(indexInLayer/fieldCountInStripeLayer);
+        return [indexInStripeLayer, stripeIndex];
+    }
+
+    indexInStripeLayerAndStripeIndexToIndexInLayer(indexInStripeLayer, stripeIndex, layerIndex) {
+        return indexInStripeLayer+stripeIndex*this.getFieldCountInStripeLayer(layerIndex);
+    }
+
+    positionInLayerToIndexInStripeLayerAndStripeIndex(positionInLayer, layerIndex) {
+        if(layerIndex > this.gpIndex*2)
+            positionInLayer -= layerIndex-this.gpIndex*2;
+        const stripeIndex = Math.floor(positionInLayer/this.gpIndex),
+              indexInStripeLayer = positionInLayer%this.gpIndex;
+        return [indexInStripeLayer, stripeIndex];
+    }
+
+    indexInStripeLayerAndStripeIndexToPositionInLayer(indexInStripeLayer, stripeIndex, layerIndex) {
+        let positionInLayer = indexInStripeLayer+this.gpIndex*stripeIndex;
+        if(layerIndex > this.gpIndex*2)
+            positionInLayer += layerIndex-this.gpIndex*2;
+        return positionInLayer;
+    }
+
+    getAntipodalIndexInLayerAndLayerIndex(indexInLayer, layerIndex) {
+        const newLayerIndex = this.gpIndex*3-layerIndex;
+        indexInLayer += (layerIndex < this.gpIndex) ? layerIndex*3 :
+                       (layerIndex <= 2*this.gpIndex) ? newLayerIndex+this.gpIndex :
+                       newLayerIndex*2;
+        return [this.wrapIndexInLayer(indexInLayer, layerIndex), newLayerIndex];
+    }
+
+    indexInLayerToIndexInTotal(indexInLayer, layerIndex) {
         if(layerIndex == 0)
             return 0;
         let offset;
@@ -56,32 +132,62 @@ export class IcosahedralClass1GoldbergPolyhedron {
         return offset*5+1+indexInLayer;
     }
 
-    getFieldPosition(indexInLayer, layerIndex) {
-        const offset = this.getFieldIndex(indexInLayer, layerIndex)*3;
-        return vec3.fromValues(this.positions[offset], this.positions[offset+1], this.positions[offset+2]);
+    getFieldPosition3D(out, indexInLayer, layerIndex) {
+        const offset = this.indexInLayerToIndexInTotal(indexInLayer, layerIndex)*3;
+        for(let i = 0; i < 3; ++i)
+            out[i] = this.positions[offset+i];
     }
 
-    /*getBorderVertexIndex(indexInLayer, layerIndex) {
-        let offset;
-        if(layerIndex < this.gpIndex)
-            offset = layerIndex*layerIndex;
-        else if(layerIndex < this.gpIndex*2)
-            offset = this.gpIndex*this.gpIndex+this.gpIndex*2*(layerIndex-this.gpIndex);
-        else {
-            layerIndex = this.gpIndex*3-layerIndex;
-            offset = this.gpIndex*this.gpIndex*4-layerIndex*layerIndex;
-        }
-        return offset*5+indexInLayer;
-    }*/
-
-    getFieldCountAtLayer(layerIndex) {
-        return (layerIndex == 0 || layerIndex == this.gpIndex*3) ? 1 :
-               this.getFieldCountPerEdgeAtLayer(layerIndex)*5;
+    getFieldPosition2D(out, indexInStripeLayer, stripeIndex, layerIndex) {
+        if(layerIndex == 0) {
+            indexInStripeLayer = -1;
+            ++layerIndex;
+        } else if(layerIndex == this.gpIndex*3) {
+            stripeIndex = 4;
+            indexInStripeLayer = 1;
+            --layerIndex;
+        } else if(layerIndex == this.gpIndex*2 && indexInStripeLayer == 0 && stripeIndex == 0)
+            stripeIndex += 5;
+        const positionInLayer = this.indexInStripeLayerAndStripeIndexToPositionInLayer(indexInStripeLayer, stripeIndex, layerIndex),
+              hexX = positionInLayer+0.5-this.gpIndex*0.5,
+              hexY = this.gpIndex*3-layerIndex-1;
+        out[0] = this.fieldWidth2D*(0.5*hexY+hexX);
+        out[1] = this.fieldHeight2D*(0.75*hexY+0.5);
     }
 
-    isPole(indexInLayer, layerIndex) {
-        const fieldCountPerEdgeAtLayer = this.getFieldCountPerEdgeAtLayer(layerIndex);
-        return (fieldCountPerEdgeAtLayer == 0 || (layerIndex%this.gpIndex == 0 && indexInLayer%fieldCountPerEdgeAtLayer == 0));
+    getBorderTexcoord(out, fieldPosition2D, direction, hemisphere) {
+        vec2.copy(out, fieldPosition2D);
+        if(typeof direction == 'number') {
+            const angle = Math.PI*2/5*direction+((hemisphere) ? 0 : Math.PI*0.2);
+            out[0] += Math.sin(angle)*this.pentagonRadius2D;
+            out[1] += Math.cos(angle)*this.pentagonRadius2D;
+        } else
+            switch(direction) {
+                case 'South':
+                    out[1] += this.fieldHeight2D*0.5;
+                    break;
+                case 'SouthEast':
+                    out[0] += this.fieldWidth2D*0.5;
+                    out[1] += this.fieldHeight2D*0.25;
+                    break;
+                case 'NorthEast':
+                    out[0] += this.fieldWidth2D*0.5;
+                    out[1] -= this.fieldHeight2D*0.25;
+                    break;
+                case 'North':
+                    out[1] -= this.fieldHeight2D*0.5;
+                    break;
+                case 'NorthWest':
+                    out[0] -= this.fieldWidth2D*0.5;
+                    out[1] -= this.fieldHeight2D*0.25;
+                    break;
+                case 'SouthWest':
+                    out[0] -= this.fieldWidth2D*0.5;
+                    out[1] += this.fieldHeight2D*0.25;
+                    break;
+            }
+        out[0] /= this.textureWidth;
+        out[1] /= this.textureHeight;
     }
 
     render() {
@@ -134,7 +240,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
             vec3.lerp(position, a, position, t);
         };
         /* Fills a triangle (A, B, C)
-         * poleIndexInLayer and poleLayerIndex are defined at point A
+         * stripeIndexAtA and layerIndexAtA are defined at point A
          * fillEdge fills the fields between B and C
          * mode switches the direction (up or down) like this:
 
@@ -161,13 +267,13 @@ export class IcosahedralClass1GoldbergPolyhedron {
          |
          +--------------> X
         */
-        const fillTriangle = (poleIndexInLayer, poleLayerIndex, fillEdge, mode, a, b, c) => {
+        const fillTriangle = (stripeIndexAtA, layerIndexAtA, fillEdge, mode, a, b, c) => {
             for(let y = 1; y < this.gpIndex+fillEdge; ++y) {
-                const layerIndex = this.gpIndex*poleLayerIndex+(mode > 0 ? -y : y),
-                      indexInLayer = poleIndexInLayer*this.getFieldCountPerEdgeAtLayer(layerIndex)+((mode > 1) ? -y : 0);
+                const layerIndex = this.gpIndex*layerIndexAtA+(mode > 0 ? -y : y),
+                      indexInLayer = stripeIndexAtA*this.getFieldCountInStripeLayer(layerIndex)+((mode > 1) ? -y : 0);
                 for(let x = 0; x < y; ++x) {
                     interpolateTriangle(a, b, c, x/y, y/this.gpIndex);
-                    generateVertex(this.getFieldIndex(indexInLayer+x, layerIndex));
+                    generateVertex(this.indexInLayerToIndexInTotal(indexInLayer+x, layerIndex));
                 }
             }
         };
@@ -192,9 +298,9 @@ export class IcosahedralClass1GoldbergPolyhedron {
         const southPole = vec3.fromValues(0, -this.sphereRadius, 0),
               northPole = vec3.fromValues(0, this.sphereRadius, 0);
         vec3.copy(position, southPole);
-        generateVertex(this.getFieldIndex(0, 0));
+        generateVertex(this.indexInLayerToIndexInTotal(0, 0));
         vec3.copy(position, northPole);
-        generateVertex(this.getFieldIndex(0, this.gpIndex*3));
+        generateVertex(this.indexInLayerToIndexInTotal(0, this.gpIndex*3));
         const southernPoles = [], northernPoles = [],
               pentagonY = 1.0/Math.sqrt(5.0)*this.sphereRadius,
               pentagonRadius = 2.0/Math.sqrt(5.0)*this.sphereRadius;
@@ -207,7 +313,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
             vec3.scale(position, position, -1.0);
             southernPoles.push(vec3.clone(position));
         }
-        /* Generate field vertices (interpolation)
+        /* Generate center vertices (interpolation)
            Each iteration generates a stripe of 4 triangles (A, B, C, D):
               * northPole
              / \
@@ -232,12 +338,12 @@ export class IcosahedralClass1GoldbergPolyhedron {
                 \ /   \ /   \ /   \ /   \ /
                  *     *     *     *     * southPole
         */
-        for(let poleIndex = 0; poleIndex < 5; ++poleIndex) {
-            const i0 = poleIndex, i1 = (poleIndex+1)%5, i2 = (poleIndex+2)%5, i3 = (poleIndex+3)%5;
-            fillTriangle(poleIndex,   0, 0, 0, southPole, southernPoles[i0], southernPoles[i1]); // Triangle A
-            fillTriangle(poleIndex+1, 2, 1, 2, northernPoles[i3], southernPoles[i0], southernPoles[i1]); // Triangle B
-            fillTriangle(poleIndex,   1, 1, 0, southernPoles[i0], northernPoles[i2], northernPoles[i3]); // Triangle C
-            fillTriangle(poleIndex,   3, 0, 1, northPole, northernPoles[i2], northernPoles[i3]); // Triangle D
+        for(let stripeIndex = 0; stripeIndex < 5; ++stripeIndex) {
+            const i0 = stripeIndex, i1 = (stripeIndex+1)%5, i2 = (stripeIndex+2)%5, i3 = (stripeIndex+3)%5;
+            fillTriangle(stripeIndex,   0, 0, 0, southPole, southernPoles[i0], southernPoles[i1]); // Triangle A
+            fillTriangle(stripeIndex+1, 2, 1, 2, northernPoles[i3], southernPoles[i0], southernPoles[i1]); // Triangle B
+            fillTriangle(stripeIndex,   1, 1, 0, southernPoles[i0], northernPoles[i2], northernPoles[i3]); // Triangle C
+            fillTriangle(stripeIndex,   3, 0, 1, northPole, northernPoles[i2], northernPoles[i3]); // Triangle D
         }
         /* Generate border vertices (tesselation)
            Each layer is generated using a tirangle strip:
@@ -249,33 +355,43 @@ export class IcosahedralClass1GoldbergPolyhedron {
             /         \ /         \ /         \ /       /
            *-----------*-----------*-----------*  ...  * lowerFiledVertex
         */
+        const lowerFiledVertex = vec3.create(),
+              upperFiledVertex = vec3.create(),
+              prevLowerFiledVertex = vec3.create(),
+              prevUpperFiledVertex = vec3.create();
         for(let layerIndex = 0; layerIndex <= this.gpIndex*3; ++layerIndex) {
             const borderVertexCountAtLayer = this.getBorderVertexCountPerEdgeAtLayer(layerIndex),
-                  hemiSphere = (layerIndex < this.gpIndex*2) ? 0 : 1;
-            let lowerIndex = 0, upperIndex = 0,
-                lowerFiledVertex = this.getFieldPosition(lowerIndex, layerIndex),
-                upperFiledVertex = this.getFieldPosition(upperIndex, layerIndex+1);
-            for(let poleIndex = 0; poleIndex < 5; ++poleIndex)
-                for(let indexInEdge = 0; indexInEdge < borderVertexCountAtLayer; ++indexInEdge) {
-                    if(indexInEdge%2 == hemiSphere) { // Downward Triangle
-                        const prevUpperFiledVertex = upperFiledVertex;
+                  hemisphere = (layerIndex < this.gpIndex*2) ? 0 : 1;
+            let lowerIndex = 0, upperIndex = 0;
+            this.getFieldPosition3D(lowerFiledVertex, lowerIndex, layerIndex);
+            this.getFieldPosition3D(upperFiledVertex, upperIndex, layerIndex+1);
+            for(let stripeIndex = 0; stripeIndex < 5; ++stripeIndex)
+                for(let indexInStripeLayer = 0; indexInStripeLayer < borderVertexCountAtLayer; ++indexInStripeLayer) {
+                    if(indexInStripeLayer%2 == hemisphere) { // Downward Triangle
+                        vec3.copy(prevUpperFiledVertex, upperFiledVertex);
                         upperIndex = this.wrapIndexInLayer(upperIndex+1, layerIndex+1);
-                        upperFiledVertex = this.getFieldPosition(upperIndex, layerIndex+1);
+                        this.getFieldPosition3D(upperFiledVertex, upperIndex, layerIndex+1);
                         generateBorderVertex(lowerFiledVertex, upperFiledVertex, prevUpperFiledVertex);
                     } else { // Upward Triangle
-                        const prevLowerFiledVertex = lowerFiledVertex;
+                        vec3.copy(prevLowerFiledVertex, lowerFiledVertex);
                         lowerIndex = this.wrapIndexInLayer(lowerIndex+1, layerIndex);
-                        lowerFiledVertex = this.getFieldPosition(lowerIndex, layerIndex);
+                        this.getFieldPosition3D(lowerFiledVertex, lowerIndex, layerIndex);
                         generateBorderVertex(lowerFiledVertex, upperFiledVertex, prevLowerFiledVertex);
                     }
                 }
         }
     }
 
-    generateTopology() {
+    generateTopologyAndTexcoords() {
         // Initialize buffers, variables and constants
-        let fieldIndex = 0,
+        this.pentagonRadius2D = this.edgeLength2D*pentagonRadiusByHexRadius;
+        this.fieldHeight2D = Math.ceil(this.edgeLength2D)*2;
+        this.fieldWidth2D = Math.ceil(this.edgeLength2D*hexWrenchFactor);
+        this.textureWidth = this.fieldWidth2D*(this.gpIndex*5.5-0.5),
+        this.textureHeight = this.fieldHeight2D*(this.gpIndex*2.25-0.5);
+        let indexInTotal = 0,
             outVertexIndex = 0,
+            borderVertexIndex = this.fieldCount,
             pentagonVertexOffset = 20*(this.gpIndex*this.gpIndex+this.gpIndex)+2*this.gpIndex-11;
         if(this.fieldsHaveCenterVertex) {
             outVertexIndex += this.fieldCount;
@@ -284,44 +400,14 @@ export class IcosahedralClass1GoldbergPolyhedron {
         const primitiveRestartIndex = 65535,
               elementsPerField = (this.fieldsHaveCenterVertex) ? 9 : 7,
               glElementBuffer = new Uint16Array(this.fieldCount*elementsPerField),
-              glVertexBuffer = new Float32Array((pentagonVertexOffset+12*5)*8);
-        this.fieldTexcoords = new Float32Array(this.fieldCount*2);
-        this.texcoordHeight = Math.ceil(this.edgeLength2D)*2;
-        this.texcoordWidth = Math.ceil(this.edgeLength2D*hexWrenchFactor);
-        this.texcoordPentagonRadius = this.edgeLength2D*pentagonRadiusByHexRadius;
-        this.textureWidth = this.texcoordWidth*(this.gpIndex*5.5-0.5),
-        this.textureHeight = this.texcoordHeight*(this.gpIndex*2.25-0.5);
+              glVertexBuffer = new Float32Array((pentagonVertexOffset+12*5)*8),
+              fieldPosition2D = vec2.create();
         // Initialize generator functions
-        const texcoord = vec2.create(),
-              fieldTexcoord = vec2.create(),
-              texcoordDiagonal = vec2.fromValues(this.texcoordWidth*0.5, this.texcoordHeight*3/4);
-        const generateTexcoord = (hexX, hexY) => {
-            vec3.scale(fieldTexcoord, texcoordDiagonal, hexY);
-            fieldTexcoord[0] += hexX*this.texcoordWidth;
-            fieldTexcoord[1] += this.texcoordHeight*0.5;
-            const vertexOffset = fieldIndex*2;
-            this.fieldTexcoords[vertexOffset+0] = fieldTexcoord[0];
-            this.fieldTexcoords[vertexOffset+1] = fieldTexcoord[1];
-        };
         const generateVertex = (vertexIndex, direction) => {
-            vec2.copy(texcoord, fieldTexcoord);
-            if(direction < 5) {
-                const angle = Math.PI*2/5*direction+((fieldIndex < this.fieldCount/2) ? Math.PI*0.2 : 0);
-                texcoord[0] += Math.sin(angle)*this.texcoordPentagonRadius;
-                texcoord[1] += Math.cos(angle)*this.texcoordPentagonRadius;
-            } else switch(direction) {
-                case 5:
-                    texcoord[1] += this.texcoordHeight*0.5;
-                    break;
-                case 6:
-                    texcoord[0] += this.texcoordWidth*0.5;
-                    texcoord[1] += this.texcoordHeight*0.25;
-                    break;
-            }
             let outVertexOffset;
             if(direction < 5)
                 outVertexOffset = pentagonVertexOffset++;
-            else if(direction < 7)
+            else if(direction != 'Close')
                 outVertexOffset = outVertexIndex++;
             else {
                 if(!this.fieldsHaveCenterVertex)
@@ -336,75 +422,66 @@ export class IcosahedralClass1GoldbergPolyhedron {
             glVertexBuffer[outVertexOffset+3] = this.normals[vertexIndex+0];
             glVertexBuffer[outVertexOffset+4] = this.normals[vertexIndex+1];
             glVertexBuffer[outVertexOffset+5] = this.normals[vertexIndex+2];
-            glVertexBuffer[outVertexOffset+6] = texcoord[0]/this.textureWidth;
-            glVertexBuffer[outVertexOffset+7] = texcoord[1]/this.textureHeight;
+            this.getBorderTexcoord(glVertexBuffer.subarray(outVertexOffset+6, outVertexOffset+8), fieldPosition2D, direction, indexInTotal > this.fieldCount/2);
         };
-        // Copy and interleave vertices
-        let borderVertexIndex = this.fieldCount;
-        const generatePentagonVertices = (layerIndex, poleIndex, elementOffsetAtLayer, borderVertexCountAtLayer0) => {
-            const shiftEast = (layerIndex == this.gpIndex*2 && poleIndex == 0);
-            if(shiftEast) {
-                fieldTexcoord[0] += this.texcoordWidth*this.gpIndex*5;
-                this.fieldTexcoords[fieldIndex*2] = fieldTexcoord[0];
-            }
-            let outElementOffset = fieldIndex*elementsPerField;
+        const generatePoleVertices = (layerIndex, stripeIndex, elementOffsetAtLayer, borderVertexCountAtLayer0) => {
+            let outElementOffset = indexInTotal*elementsPerField;
             if(this.fieldsHaveCenterVertex)
-                glElementBuffer[outElementOffset+0] = fieldIndex;
+                glElementBuffer[outElementOffset+0] = indexInTotal;
             else
                 --outElementOffset;
             for(let i = 0; i < 5; ++i)
                 glElementBuffer[outElementOffset+i+1] = pentagonVertexOffset+i;
             glElementBuffer[outElementOffset+6] = glElementBuffer[outElementOffset+1];
             if(this.fieldsHaveCenterVertex)
-                glElementBuffer[outElementOffset+7] = fieldIndex;
+                glElementBuffer[outElementOffset+7] = indexInTotal;
             else
                 --outElementOffset;
             glElementBuffer[outElementOffset+8] = primitiveRestartIndex;
-            if(layerIndex == 0)
+            if(layerIndex == 0) // South Pole
                 for(let i = 4; i >= 0; --i)
                     generateVertex(borderVertexIndex+i, i);
-            else if(layerIndex == this.gpIndex*3)
+            else if(layerIndex == this.gpIndex*3) // North Pole
                 for(let i = 0; i < 5; ++i)
                     generateVertex(borderVertexIndex-5+i, i);
-            else if(poleIndex == 0) {
-                if(layerIndex == this.gpIndex) {
+            else if(stripeIndex == 0) { // Western Poles
+                if(layerIndex == this.gpIndex) { // Southern Pole
                     generateVertex(borderVertexIndex, 0);
                     generateVertex(borderVertexIndex+elementOffsetAtLayer-5, 1);
                     generateVertex(borderVertexIndex+elementOffsetAtLayer-6, 2);
                     generateVertex(borderVertexIndex+elementOffsetAtLayer+borderVertexCountAtLayer0-7, 3);
                     generateVertex(borderVertexIndex+elementOffsetAtLayer-7, 4);
-                } else {
+                } else { // Northern Pole
                     generateVertex(borderVertexIndex+elementOffsetAtLayer-1, 0);
                     generateVertex(borderVertexIndex, 1);
                     generateVertex(borderVertexIndex+elementOffsetAtLayer, 2);
                     generateVertex(borderVertexIndex+elementOffsetAtLayer+borderVertexCountAtLayer0-1, 3);
                     generateVertex(borderVertexIndex+elementOffsetAtLayer-2, 4);
+                    fieldPosition2D[0] -= this.fieldWidth2D*this.gpIndex*5;
                 }
-            } else {
+            } else { // Other Poles
                 generateVertex(borderVertexIndex, 0);
-                if(layerIndex == this.gpIndex) {
-                    elementOffsetAtLayer += poleIndex;
+                if(layerIndex == this.gpIndex) { // Southern Poles
+                    elementOffsetAtLayer += stripeIndex;
                     generateVertex(borderVertexIndex+elementOffsetAtLayer-5, 1);
                     generateVertex(borderVertexIndex+elementOffsetAtLayer-6, 2);
                     generateVertex(borderVertexIndex+elementOffsetAtLayer-7, 3);
-                } else {
-                    elementOffsetAtLayer -= poleIndex;
+                } else { // Northern Poles
+                    elementOffsetAtLayer -= stripeIndex;
                     generateVertex(borderVertexIndex+1, 1);
                     generateVertex(borderVertexIndex+elementOffsetAtLayer+1, 2);
                     generateVertex(borderVertexIndex+elementOffsetAtLayer, 3);
                 }
                 generateVertex(borderVertexIndex-1, 4);
             }
-            generateVertex(fieldIndex++, 7);
-            if(shiftEast)
-                fieldTexcoord[0] -= this.texcoordWidth*this.gpIndex*5;
+            generateVertex(indexInTotal++, 'Close');
         };
-        // Combination loops
-        generateTexcoord(0.5-this.gpIndex, this.gpIndex*2);
-        generatePentagonVertices(0);
+        // Generate south pole
+        this.getFieldPosition2D(fieldPosition2D, 0, 0, 0);
+        generatePoleVertices(0);
+        // Copy and interleave vertices
         for(let layerIndex = 1; layerIndex < this.gpIndex*3; ++layerIndex) {
-            const hexY = this.gpIndex*3-layerIndex-1,
-                  fieldCountAtLayer = this.getFieldCountPerEdgeAtLayer(layerIndex),
+            const fieldCountInStripeLayer = this.getFieldCountInStripeLayer(layerIndex),
                   borderVertexCountAtLayer0 = this.getBorderVertexCountPerEdgeAtLayer(layerIndex)*5,
                   borderVertexCountAtLayer1 = this.getBorderVertexCountPerEdgeAtLayer(layerIndex-1),
                   borderVertexCountAtLayer2 = this.getBorderVertexCountPerEdgeAtLayer(layerIndex-2);
@@ -417,51 +494,47 @@ export class IcosahedralClass1GoldbergPolyhedron {
                     elementCountAtLayer += (layerIndex+1 == this.gpIndex*2) ? 1 : 2;
             } else
                 elementCountAtLayer = (this.gpIndex*3-layerIndex)*10+5;
-            for(let poleIndex = 0; poleIndex < 5; ++poleIndex) {
+            for(let stripeIndex = 0; stripeIndex < 5; ++stripeIndex) {
                 let elementOffsetAtLayer = elementCountAtLayer;
                 if(layerIndex < this.gpIndex-1)
-                    elementOffsetAtLayer += poleIndex*2;
+                    elementOffsetAtLayer += stripeIndex*2;
                 else if(layerIndex == this.gpIndex-1)
-                    elementOffsetAtLayer += poleIndex-1;
+                    elementOffsetAtLayer += stripeIndex-1;
                 else if(layerIndex == this.gpIndex)
                     ++elementOffsetAtLayer;
                 else if(layerIndex == this.gpIndex*2+1)
-                    elementOffsetAtLayer += (4-poleIndex);
+                    elementOffsetAtLayer += (4-stripeIndex);
                 else if(layerIndex > this.gpIndex*2+1)
-                    elementOffsetAtLayer += (4-poleIndex)*2;
-                for(let indexInEdge = 0; indexInEdge < fieldCountAtLayer; ++indexInEdge) {
-                    const indexInLayer = fieldCountAtLayer*poleIndex+indexInEdge,
-                          isNotPole = (indexInEdge > 0 || layerIndex%this.gpIndex > 0);
-                    let hexX = indexInEdge+this.gpIndex*poleIndex-this.gpIndex/2+0.5;
-                    if(layerIndex > this.gpIndex*2)
-                        hexX += layerIndex-this.gpIndex*2;
-                    generateTexcoord(hexX, hexY);
-                    if(indexInEdge == 0 && (poleIndex == 0 || layerIndex < this.gpIndex || layerIndex > this.gpIndex*2)) {
-                        fieldTexcoord[0] -= this.texcoordWidth;
-                        if(layerIndex > this.gpIndex*2+1) {
-                            generateVertex((poleIndex == 0)
+                    elementOffsetAtLayer += (4-stripeIndex)*2;
+                for(let indexInStripeLayer = 0; indexInStripeLayer < fieldCountInStripeLayer; ++indexInStripeLayer) {
+                    const indexInLayer = fieldCountInStripeLayer*stripeIndex+indexInStripeLayer,
+                          isNotPole = (indexInStripeLayer > 0 || layerIndex%this.gpIndex > 0);
+                    this.getFieldPosition2D(fieldPosition2D, indexInStripeLayer, stripeIndex, layerIndex);
+                    if(indexInStripeLayer == 0 && (stripeIndex == 0 || layerIndex < this.gpIndex || layerIndex > this.gpIndex*2)) { // Seam edge
+                        fieldPosition2D[0] -= this.fieldWidth2D;
+                        if(layerIndex > this.gpIndex*2+1)
+                            generateVertex((stripeIndex == 0)
                                 ? borderVertexIndex-2
-                                : borderVertexIndex-borderVertexCountAtLayer2*(5-poleIndex)-borderVertexCountAtLayer1*poleIndex-2
-                            , 5);
-                        }
+                                : borderVertexIndex-borderVertexCountAtLayer2*(5-stripeIndex)-borderVertexCountAtLayer1*stripeIndex-2
+                            , 'South');
                         if(isNotPole) {
                             let vertexIndex;
                             if(layerIndex > this.gpIndex*2)
-                                vertexIndex = (poleIndex == 0) ? borderVertexIndex+borderVertexCountAtLayer1*5-1 : borderVertexIndex-1;
+                                vertexIndex = (stripeIndex == 0) ? borderVertexIndex+borderVertexCountAtLayer1*5-1 : borderVertexIndex-1;
                             else if(layerIndex > this.gpIndex)
                                 vertexIndex = borderVertexIndex+borderVertexCountAtLayer1*5-2;
-                            else if(poleIndex == 0)
+                            else if(stripeIndex == 0)
                                 vertexIndex = borderVertexIndex+borderVertexCountAtLayer1*5+borderVertexCountAtLayer0-2;
                             else
-                                vertexIndex = borderVertexIndex+borderVertexCountAtLayer0-(6-poleIndex)*2;
-                            generateVertex(vertexIndex, 6);
+                                vertexIndex = borderVertexIndex+borderVertexCountAtLayer0-(6-stripeIndex)*2;
+                            generateVertex(vertexIndex, 'SouthEast');
                         }
-                        fieldTexcoord[0] += this.texcoordWidth;
+                        fieldPosition2D[0] += this.fieldWidth2D;
                     }
                     if(isNotPole) {
-                        let outElementOffset = fieldIndex*elementsPerField;
+                        let outElementOffset = indexInTotal*elementsPerField;
                         if(this.fieldsHaveCenterVertex)
-                            glElementBuffer[outElementOffset+0] = fieldIndex;
+                            glElementBuffer[outElementOffset+0] = indexInTotal;
                         else
                             --outElementOffset;
                         glElementBuffer[outElementOffset+1] = outVertexIndex-1;
@@ -475,41 +548,94 @@ export class IcosahedralClass1GoldbergPolyhedron {
                         else
                             --outElementOffset;
                         glElementBuffer[outElementOffset+8] = primitiveRestartIndex;
-                        generateVertex(fieldIndex++, 7);
+                        generateVertex(indexInTotal++, 'Close');
                     } else
-                        generatePentagonVertices(layerIndex, poleIndex, elementOffsetAtLayer, borderVertexCountAtLayer0);
+                        generatePoleVertices(layerIndex, stripeIndex, elementOffsetAtLayer, borderVertexCountAtLayer0);
                     let vertexIndex;
-                    if(indexInEdge > 0 ||
-                       (poleIndex == 0 && layerIndex > this.gpIndex*2) ||
-                       (poleIndex > 0 && layerIndex > this.gpIndex))
+                    if(indexInStripeLayer > 0 ||
+                       (stripeIndex == 0 && layerIndex > this.gpIndex*2) ||
+                       (stripeIndex > 0 && layerIndex > this.gpIndex))
                         vertexIndex = borderVertexIndex++;
-                    else if(poleIndex == 0)
+                    else if(stripeIndex == 0)
                         vertexIndex = borderVertexIndex+borderVertexCountAtLayer1*5-1;
                     else
                         vertexIndex = borderVertexIndex-1;
-                    generateVertex(vertexIndex, 5);
-                    generateVertex(borderVertexIndex++, 6);
-                    if(indexInEdge+1 == fieldCountAtLayer &&
-                       (layerIndex > this.gpIndex*2 || (poleIndex == 4 && layerIndex > this.gpIndex))) {
-                        fieldTexcoord[0] += this.texcoordWidth;
-                        generateVertex(borderVertexIndex++, 5);
+                    generateVertex(vertexIndex, 'South');
+                    generateVertex(borderVertexIndex++, 'SouthEast');
+                    if(indexInStripeLayer+1 == fieldCountInStripeLayer &&
+                       (layerIndex > this.gpIndex*2 || (stripeIndex == 4 && layerIndex > this.gpIndex))) {
+                        fieldPosition2D[0] += this.fieldWidth2D;
+                        generateVertex(borderVertexIndex++, 'South');
                     }
                 }
             }
         }
-        for(let poleIndex = 0; poleIndex < 5; ++poleIndex) {
-            const hexX = this.gpIndex*poleIndex-this.gpIndex/2+0.5 + this.gpIndex-1;
-            generateTexcoord(hexX, -1);
-            generateVertex(borderVertexIndex+((poleIndex == 0) ? -2 : poleIndex*2-17), 5);
-            fieldTexcoord[0] += this.texcoordWidth*0.5;
-            fieldTexcoord[1] -= this.texcoordHeight*0.25;
-            generateVertex(borderVertexIndex+((poleIndex == 0) ? 4 : -1), 5);
-            fieldTexcoord[0] += this.texcoordWidth*0.5;
-            fieldTexcoord[1] += this.texcoordHeight*0.25;
-            generateVertex(borderVertexIndex++, 5);
+        // Generate north crown
+        for(let stripeIndex = 0; stripeIndex < 5; ++stripeIndex) {
+            this.getFieldPosition2D(fieldPosition2D, 0, stripeIndex, this.gpIndex*3-1);
+            generateVertex(borderVertexIndex+((stripeIndex == 0) ? -2 : stripeIndex*2-17), 'NorthWest');
+            generateVertex(borderVertexIndex+((stripeIndex == 0) ? 4 : -1), 'North');
+            generateVertex(borderVertexIndex++, 'NorthEast');
         }
-        generateTexcoord(this.gpIndex*5, this.gpIndex-2);
-        generatePentagonVertices(this.gpIndex*3);
+        // Generate north pole
+        this.getFieldPosition2D(fieldPosition2D, 0, 0, this.gpIndex*3);
+        generatePoleVertices(this.gpIndex*3);
+        // Create render buffers
         this.vertexArray = this.renderContext.createVertexArray(glVertexBuffer, glElementBuffer);
+    }
+
+    generateTexture() {
+        this.texture = this.renderContext.createTexture(this.renderContext.gl.LINEAR_MIPMAP_LINEAR, this.renderContext.gl.LINEAR);
+        while(groundLayer.hasChildNodes())
+            groundLayer.removeChild(groundLayer.lastChild);
+        while(gridLayer.hasChildNodes())
+            gridLayer.removeChild(gridLayer.lastChild);
+        svgElement.setAttribute('width', this.textureWidth);
+        svgElement.setAttribute('height', this.textureHeight);
+        let path = '';
+        for(let i = 0; i < 5; ++i) {
+            const angle = Math.PI*2/5*i;
+            path += (i == 0) ? 'M' : 'L';
+            path += Math.round(Math.sin(angle)*this.pentagonRadius2D)+','+Math.round(Math.cos(angle)*this.pentagonRadius2D);
+        }
+        pentagonElement.setAttribute('id', 'pentagon');
+        pentagonElement.setAttribute('d', path+'Z');
+        hexagonElement.setAttribute('id', 'hexagon');
+        hexagonElement.setAttribute('d',
+            'M'+(this.fieldWidth2D*0.5)+','+(this.fieldHeight2D*0.25)+
+            'L'+(this.fieldWidth2D*0.5)+','+(-this.fieldHeight2D*0.25)+
+            'L0,'+(-this.fieldHeight2D*0.5)+
+            'L'+(-this.fieldWidth2D*0.5)+','+(-this.fieldHeight2D*0.25)+
+            'L'+(-this.fieldWidth2D*0.5)+','+(this.fieldHeight2D*0.25)+
+            'L0,'+(this.fieldHeight2D*0.5)+
+            'Z'
+        );
+        groundLayer.setAttribute('filter', 'url(#outlineFilter)');
+        const position2D = vec2.create();
+        const generateField = (indexInStripeLayer, stripeIndex, layerIndex) => {
+            const isPole = this.isPole(indexInStripeLayer, layerIndex),
+                  indexInLayer = this.indexInStripeLayerAndStripeIndexToIndexInLayer(indexInStripeLayer, stripeIndex, layerIndex),
+                  tileElement = createSvgElement('use', groundLayer),
+                  textElement = createSvgElement('text', gridLayer),
+                  borderElement = createSvgElement('use', gridLayer);
+            this.getFieldPosition2D(position2D, indexInStripeLayer, stripeIndex, layerIndex);
+            tileElement.setAttribute('transform', 'translate('+position2D[0]+','+position2D[1]+')'+((isPole && layerIndex < this.gpIndex*1.5) ? ' rotate(37)' : ''));
+            tileElement.setAttribute('fill', '#444');
+            tileElement.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', (isPole) ? '#pentagon' : '#hexagon');
+            textElement.setAttribute('fill', '#FFF');
+            textElement.setAttribute('transform', 'translate('+position2D[0]+','+(position2D[1]+4)+')');
+            textElement.textContent = `${this.indexInStripeLayerAndStripeIndexToPositionInLayer(indexInStripeLayer, stripeIndex, layerIndex)} ${layerIndex}`;
+            borderElement.setAttribute('transform', tileElement.getAttribute('transform'));
+            borderElement.setAttribute('fill', 'none');
+            borderElement.setAttribute('stroke', '#FFF');
+            borderElement.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', (isPole) ? '#pentagon' : '#hexagon');
+        };
+        generateField(0, 0, this.gpIndex*3);
+        generateField(0, 0, 0);
+        for(let layerIndex = this.gpIndex*3-1; layerIndex > 0; --layerIndex)
+            for(let stripeIndex = 0; stripeIndex < 5; ++stripeIndex)
+                for(let indexInStripeLayer = 0; indexInStripeLayer < this.getFieldCountInStripeLayer(layerIndex); ++indexInStripeLayer)
+                    generateField(indexInStripeLayer, stripeIndex, layerIndex);
+        this.renderContext.renderImageToTexture(svgElement, this.texture);
     }
 }
