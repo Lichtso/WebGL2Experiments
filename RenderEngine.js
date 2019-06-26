@@ -149,7 +149,7 @@ export class RenderContext {
         return vertexArray;
     }
 
-    createTexture(minFilter, maxFilter) {
+    createTexture(minFilter=this.gl.LINEAR_MIPMAP_LINEAR, maxFilter=this.gl.LINEAR) {
         const texture = this.gl.createTexture();
         this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
         this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, minFilter);
@@ -162,31 +162,30 @@ export class RenderContext {
         return texture;
     }
 
+    createDepthMap() {
+        const depthBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, depthBuffer);
+        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.DEPTH_COMPONENT32F, this.gl.canvas.width, this.gl.canvas.height);
+        // gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.DEPTH_COMPONENT32F, this.gl.canvas.width, this.gl.canvas.height, 0, this.gl.DEPTH_COMPONENT, this.gl.FLOAT, null);
+        const frameBuffer = this.gl.createFramebuffer();
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, frameBuffer);
+        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.DEPTH_ATTACHMENT, this.gl.TEXTURE_2D, depthBuffer, 0);
+    }
+
     bindTexture(slotIndex, texture) {
         this.gl.activeTexture(this.gl.TEXTURE0+slotIndex);
         this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
     }
 
-    renderImageToTexture(source, texture) {
+    renderImageToTexture(destination, source) {
         const image = new Image();
         image.onload = () => {
-            this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+            this.gl.bindTexture(this.gl.TEXTURE_2D, destination);
             this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, image);
             this.gl.generateMipmap(this.gl.TEXTURE_2D);
         };
         image.src = (source instanceof SVGElement) ? 'data:image/svg+xml;base64,'+window.btoa(new XMLSerializer().serializeToString(source)) : source;
     }
-
-    /*createDepthMap() {
-        const depthBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, depthBuffer);
-        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.DEPTH_COMPONENT32F, this.gl.canvas.width, this.gl.canvas.height);
-        // gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.DEPTH_COMPONENT32F, this.gl.canvas.width, this.gl.canvas.height, 0, this.gl.DEPTH_COMPONENT, this.gl.FLOAT, null);
-
-        const frameBuffer = this.gl.createFramebuffer();
-        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, frameBuffer);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.DEPTH_ATTACHMENT, this.gl.TEXTURE_2D, depthBuffer, 0);
-    }*/
 
     setViewport() {
         const devicePixelRatio = window.devicePixelRatio || 1;

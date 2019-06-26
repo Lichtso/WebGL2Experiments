@@ -17,7 +17,6 @@ layout(location=0) out vec4 color;
 void main() {
     color = texture(diffuseMap, fTexcoord);
     vec3 normal = texture(normalMap, fTexcoord).xyz;
-
     vec3 lightVector = normalize(vec3(-1.0, 1.0, 2.0));
-    color.rgb *= clamp(pow(1024.0, dot(normal, lightVector))-1.0, 0.5, 1.0);
+    color.rgb *= clamp(pow(128.0, dot(normal, lightVector))-1.0, 0.5, 1.0);
 }`;

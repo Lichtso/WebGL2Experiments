@@ -1,7 +1,8 @@
 import {vec2, vec3} from './gl-matrix.js';
 
 const hexWrenchFactor = Math.sqrt(3.0), // 2.0*Math.sin(Math.PI/6.0)
-      pentagonRadiusByHexRadius = 1.0/(2.0*Math.sin(Math.PI/5.0)); // Math.sin(0.3*Math.PI)/Math.sin(0.4*Math.PI)
+      pentagonRadiusByHexRadius = 1.0/(2.0*Math.sin(Math.PI/5.0)), // Math.sin(0.3*Math.PI)/Math.sin(0.4*Math.PI)
+      icosahedronRadiusByEdgeLength = Math.sin(Math.PI*2.0/5.0); // 0.25*Math.sqrt(10.0+2.0*Math.sqrt(5.0))
 
 function vec3Slerp(out, a, b, t) {
     const cos = vec3.dot(a, b)/vec3.dot(a, a),
@@ -19,40 +20,57 @@ function createSvgElement(tag, parentNode) {
     return node;
 }
 
-const svgElement = createSvgElement('svg');
-svgElement.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-svgElement.setAttribute('text-anchor', 'middle');
-svgElement.setAttribute('font-family', 'Helvetica');
-svgElement.setAttribute('font-size', '12');
-const defs = createSvgElement('defs', svgElement),
-      outlineFilter = createSvgElement('filter', defs),
-      feMorphology = createSvgElement('feMorphology', outlineFilter),
-      feMerge = createSvgElement('feMerge', outlineFilter),
-      feMergeNodeA = createSvgElement('feMergeNode', feMerge),
-      feMergeNodeB = createSvgElement('feMergeNode', feMerge),
-      pentagonElement = createSvgElement('path', defs),
-      hexagonElement = createSvgElement('path', defs),
-      groundLayer = createSvgElement('g', svgElement),
-      gridLayer = createSvgElement('g', svgElement);
-outlineFilter.setAttribute('id', 'outlineFilter');
-feMorphology.setAttribute('id', 'SourceAlpha');
-feMorphology.setAttribute('result', 'dilated');
-feMorphology.setAttribute('operator', 'dilate');
-feMorphology.setAttribute('radius', '1');
-feMergeNodeA.setAttribute('in', 'dilated');
-feMergeNodeB.setAttribute('in', 'SourceGraphic');
-groundLayer.setAttribute('shape-rendering', 'crispEdges');
+let svgElement;
+function createSvgCanvas() {
+    if(svgElement) {
+        for(let i = 1; i < 3; ++i)
+            while(svgElement.childNodes[0].hasChildNodes())
+                groundLayer.removeChild(svgElement.childNodes[0].lastChild);
+        return;
+    }
+    svgElement = createSvgElement('svg');
+    svgElement.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    svgElement.setAttribute('version', '1.1');
+    svgElement.setAttribute('text-anchor', 'middle');
+    svgElement.setAttribute('font-family', 'Helvetica');
+    svgElement.setAttribute('font-size', '12');
+    const defs = createSvgElement('defs', svgElement),
+          outlineFilter = createSvgElement('filter', defs),
+          feMorphology = createSvgElement('feMorphology', outlineFilter),
+          feMerge = createSvgElement('feMerge', outlineFilter),
+          feMergeNodeA = createSvgElement('feMergeNode', feMerge),
+          feMergeNodeB = createSvgElement('feMergeNode', feMerge),
+          groundLayer = createSvgElement('g', svgElement),
+          gridLayer = createSvgElement('g', svgElement);
+    outlineFilter.setAttribute('id', 'outlineFilter');
+    feMorphology.setAttribute('id', 'SourceAlpha');
+    feMorphology.setAttribute('result', 'dilated');
+    feMorphology.setAttribute('operator', 'dilate');
+    feMorphology.setAttribute('radius', '1');
+    feMergeNodeA.setAttribute('in', 'dilated');
+    feMergeNodeB.setAttribute('in', 'SourceGraphic');
+    groundLayer.setAttribute('filter', 'url(#outlineFilter)');
+    groundLayer.setAttribute('shape-rendering', 'crispEdges');
+    for(let j = 0; j < 2; ++j) {
+        const pathElement = createSvgElement('path', defs);
+        pathElement.setAttribute('id', (j == 0) ? 'pentagon' : 'hexagon');
+        let data = '';
+        for(let i = 0; i < 5+j; ++i) {
+            const angle = i/(5+j)*2*Math.PI;
+            data += (i == 0) ? 'M' : 'L';
+            data += Math.sin(angle)+','+Math.cos(angle);
+        }
+        pathElement.setAttribute('d', data+'Z');
+    }
+}
 
 export class IcosahedralClass1GoldbergPolyhedron {
-    constructor(renderContext, abandon, fieldsHaveCenterVertex, gpIndex, edgeLength3D, edgeLength2D) {
-        this.renderContext = renderContext;
+    constructor(abandon, fieldsHaveCenterVertex, gpIndex, edgeLength3D, edgeLength2D) {
         this.abandon = abandon; // One of ['curvature', 'size', 'shape']
         this.gpIndex = gpIndex; // Number of fields along the edge between two poles (including one of the two poles)
         this.edgeLength3D = edgeLength3D;
         this.edgeLength2D = edgeLength2D;
         this.fieldsHaveCenterVertex = fieldsHaveCenterVertex;
-        this.generateGeometry();
-        this.generateTopologyAndTexcoords();
     }
 
     getBorderVertexCountPerEdgeAtLayer(layerIndex) {
@@ -117,10 +135,9 @@ export class IcosahedralClass1GoldbergPolyhedron {
     }
 
     indexInLayerToIndexInTotal(indexInLayer, layerIndex) {
-        if(layerIndex == 0)
+        if(layerIndex-- == 0)
             return 0;
         let offset;
-        --layerIndex;
         if(layerIndex < this.gpIndex)
             offset = (layerIndex*layerIndex+layerIndex)/2;
         else if(layerIndex < this.gpIndex*2)
@@ -129,7 +146,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
             layerIndex = this.gpIndex*3-layerIndex-1;
             offset = (this.gpIndex*this.gpIndex)*2-(layerIndex*layerIndex+layerIndex)/2;
         }
-        return offset*5+1+indexInLayer;
+        return 1+offset*5+indexInLayer;
     }
 
     getFieldPosition3D(out, indexInLayer, layerIndex) {
@@ -140,6 +157,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
 
     getFieldPosition2D(out, indexInStripeLayer, stripeIndex, layerIndex) {
         if(layerIndex == 0) {
+            stripeIndex = 0;
             indexInStripeLayer = -1;
             ++layerIndex;
         } else if(layerIndex == this.gpIndex*3) {
@@ -190,19 +208,10 @@ export class IcosahedralClass1GoldbergPolyhedron {
         out[1] /= this.textureHeight;
     }
 
-    render() {
-        this.renderContext.gl.bindVertexArray(this.vertexArray);
-        this.renderContext.gl.drawElements(this.renderContext.gl.TRIANGLE_FAN, this.fieldCount*((this.fieldsHaveCenterVertex) ? 9 : 7), this.renderContext.gl.UNSIGNED_SHORT, 0);
-    }
-
-    cleanup() {
-        this.renderContext.gl.deleteVertexArray(this.vertexArray);
-    }
-
     generateGeometry() {
         // Initialize buffers, variables and constants
         this.icosahedronEdgeLength = this.gpIndex*this.edgeLength3D*hexWrenchFactor;
-        this.sphereRadius = this.icosahedronEdgeLength*Math.sin(Math.PI*2.0/5.0); // this.icosahedronEdgeLength*0.25*Math.sqrt(10.0+2.0*Math.sqrt(5.0)); // https://en.wikipedia.org/wiki/Regular_icosahedron#Dimensions
+        this.sphereRadius = this.icosahedronEdgeLength*icosahedronRadiusByEdgeLength;
         this.fieldCount = this.gpIndex*this.gpIndex*10+2;
         this.borderVertexCount = this.gpIndex*this.gpIndex*20;
         this.vertexCount = this.fieldCount+this.borderVertexCount;
@@ -389,6 +398,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
         this.fieldWidth2D = Math.ceil(this.edgeLength2D*hexWrenchFactor);
         this.textureWidth = this.fieldWidth2D*(this.gpIndex*5.5-0.5),
         this.textureHeight = this.fieldHeight2D*(this.gpIndex*2.25-0.5);
+        this.elementsPerField = (this.fieldsHaveCenterVertex) ? 9 : 7;
         let indexInTotal = 0,
             outVertexIndex = 0,
             borderVertexIndex = this.fieldCount,
@@ -398,8 +408,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
             pentagonVertexOffset += this.fieldCount;
         }
         const primitiveRestartIndex = 65535,
-              elementsPerField = (this.fieldsHaveCenterVertex) ? 9 : 7,
-              glElementBuffer = new Uint16Array(this.fieldCount*elementsPerField),
+              glElementBuffer = new Uint16Array(this.fieldCount*this.elementsPerField),
               glVertexBuffer = new Float32Array((pentagonVertexOffset+12*5)*8),
               fieldPosition2D = vec2.create();
         // Initialize generator functions
@@ -425,7 +434,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
             this.getBorderTexcoord(glVertexBuffer.subarray(outVertexOffset+6, outVertexOffset+8), fieldPosition2D, direction, indexInTotal > this.fieldCount/2);
         };
         const generatePoleVertices = (layerIndex, stripeIndex, elementOffsetAtLayer, borderVertexCountAtLayer0) => {
-            let outElementOffset = indexInTotal*elementsPerField;
+            let outElementOffset = indexInTotal*this.elementsPerField;
             if(this.fieldsHaveCenterVertex)
                 glElementBuffer[outElementOffset+0] = indexInTotal;
             else
@@ -439,8 +448,8 @@ export class IcosahedralClass1GoldbergPolyhedron {
                 --outElementOffset;
             glElementBuffer[outElementOffset+8] = primitiveRestartIndex;
             if(layerIndex == 0) // South Pole
-                for(let i = 4; i >= 0; --i)
-                    generateVertex(borderVertexIndex+i, i);
+                for(let i = 0; i < 5; ++i)
+                    generateVertex(borderVertexIndex+4-i, i);
             else if(layerIndex == this.gpIndex*3) // North Pole
                 for(let i = 0; i < 5; ++i)
                     generateVertex(borderVertexIndex-5+i, i);
@@ -532,7 +541,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
                         fieldPosition2D[0] += this.fieldWidth2D;
                     }
                     if(isNotPole) {
-                        let outElementOffset = indexInTotal*elementsPerField;
+                        let outElementOffset = indexInTotal*this.elementsPerField;
                         if(this.fieldsHaveCenterVertex)
                             glElementBuffer[outElementOffset+0] = indexInTotal;
                         else
@@ -580,55 +589,38 @@ export class IcosahedralClass1GoldbergPolyhedron {
         // Generate north pole
         this.getFieldPosition2D(fieldPosition2D, 0, 0, this.gpIndex*3);
         generatePoleVertices(this.gpIndex*3);
-        // Create render buffers
-        this.vertexArray = this.renderContext.createVertexArray(glVertexBuffer, glElementBuffer);
+        return [glVertexBuffer, glElementBuffer];
     }
 
-    generateTexture() {
-        this.texture = this.renderContext.createTexture(this.renderContext.gl.LINEAR_MIPMAP_LINEAR, this.renderContext.gl.LINEAR);
-        while(groundLayer.hasChildNodes())
-            groundLayer.removeChild(groundLayer.lastChild);
-        while(gridLayer.hasChildNodes())
-            gridLayer.removeChild(gridLayer.lastChild);
+    generateTextureImage() {
+        createSvgCanvas();
         svgElement.setAttribute('width', this.textureWidth);
         svgElement.setAttribute('height', this.textureHeight);
-        let path = '';
-        for(let i = 0; i < 5; ++i) {
-            const angle = Math.PI*2/5*i;
-            path += (i == 0) ? 'M' : 'L';
-            path += Math.round(Math.sin(angle)*this.pentagonRadius2D)+','+Math.round(Math.cos(angle)*this.pentagonRadius2D);
-        }
-        pentagonElement.setAttribute('id', 'pentagon');
-        pentagonElement.setAttribute('d', path+'Z');
-        hexagonElement.setAttribute('id', 'hexagon');
-        hexagonElement.setAttribute('d',
-            'M'+(this.fieldWidth2D*0.5)+','+(this.fieldHeight2D*0.25)+
-            'L'+(this.fieldWidth2D*0.5)+','+(-this.fieldHeight2D*0.25)+
-            'L0,'+(-this.fieldHeight2D*0.5)+
-            'L'+(-this.fieldWidth2D*0.5)+','+(-this.fieldHeight2D*0.25)+
-            'L'+(-this.fieldWidth2D*0.5)+','+(this.fieldHeight2D*0.25)+
-            'L0,'+(this.fieldHeight2D*0.5)+
-            'Z'
-        );
-        groundLayer.setAttribute('filter', 'url(#outlineFilter)');
+        svgElement.childNodes[0].childNodes[1].setAttribute('transform', `scale(${this.pentagonRadius2D},${this.pentagonRadius2D})`);
+        svgElement.childNodes[0].childNodes[2].setAttribute('transform', `scale(${this.edgeLength2D},${this.edgeLength2D})`);
+        svgElement.childNodes[0].childNodes[1].setAttribute('stroke-width', 2.0/this.pentagonRadius2D);
+        svgElement.childNodes[0].childNodes[2].setAttribute('stroke-width', 2.0/this.edgeLength2D);
         const position2D = vec2.create();
         const generateField = (indexInStripeLayer, stripeIndex, layerIndex) => {
             const isPole = this.isPole(indexInStripeLayer, layerIndex),
                   indexInLayer = this.indexInStripeLayerAndStripeIndexToIndexInLayer(indexInStripeLayer, stripeIndex, layerIndex),
-                  tileElement = createSvgElement('use', groundLayer),
-                  textElement = createSvgElement('text', gridLayer),
-                  borderElement = createSvgElement('use', gridLayer);
+                  tileElement = createSvgElement('use', svgElement.childNodes[1]),
+                  textElement = createSvgElement('text', svgElement.childNodes[2]),
+                  borderElement = createSvgElement('use', svgElement.childNodes[2]);
             this.getFieldPosition2D(position2D, indexInStripeLayer, stripeIndex, layerIndex);
-            tileElement.setAttribute('transform', 'translate('+position2D[0]+','+position2D[1]+')'+((isPole && layerIndex < this.gpIndex*1.5) ? ' rotate(37)' : ''));
-            tileElement.setAttribute('fill', '#444');
-            tileElement.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', (isPole) ? '#pentagon' : '#hexagon');
-            textElement.setAttribute('fill', '#FFF');
-            textElement.setAttribute('transform', 'translate('+position2D[0]+','+(position2D[1]+4)+')');
+            let transform = `translate(${position2D[0]},${position2D[1]}) `;
+            if(isPole && layerIndex < this.gpIndex*1.5)
+                transform += 'rotate(36)';
+            tileElement.setAttribute('transform', transform);
+            tileElement.setAttribute('fill', '#AAA');
+            tileElement.setAttribute('href', (isPole) ? '#pentagon' : '#hexagon');
+            textElement.setAttribute('transform', `translate(${position2D[0]},${position2D[1]+4})`);
+            textElement.setAttribute('fill', '#000');
             textElement.textContent = `${this.indexInStripeLayerAndStripeIndexToPositionInLayer(indexInStripeLayer, stripeIndex, layerIndex)} ${layerIndex}`;
-            borderElement.setAttribute('transform', tileElement.getAttribute('transform'));
+            borderElement.setAttribute('transform', transform);
             borderElement.setAttribute('fill', 'none');
-            borderElement.setAttribute('stroke', '#FFF');
-            borderElement.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', (isPole) ? '#pentagon' : '#hexagon');
+            borderElement.setAttribute('stroke', '#000');
+            borderElement.setAttribute('href', (isPole) ? '#pentagon' : '#hexagon');
         };
         generateField(0, 0, this.gpIndex*3);
         generateField(0, 0, 0);
@@ -636,6 +628,6 @@ export class IcosahedralClass1GoldbergPolyhedron {
             for(let stripeIndex = 0; stripeIndex < 5; ++stripeIndex)
                 for(let indexInStripeLayer = 0; indexInStripeLayer < this.getFieldCountInStripeLayer(layerIndex); ++indexInStripeLayer)
                     generateField(indexInStripeLayer, stripeIndex, layerIndex);
-        this.renderContext.renderImageToTexture(svgElement, this.texture);
+        return svgElement;
     }
 }
