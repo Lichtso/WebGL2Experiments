@@ -149,6 +149,32 @@ export class IcosahedralClass1GoldbergPolyhedron {
         return 1+offset*5+indexInLayer;
     }
 
+    indexInTotalToIndexInLayerAndLayerIndex(indexInTotal) {
+        if(indexInTotal-- == 0)
+            return [0, 0]; // South Pole
+        const filedsPerTriangle = ((this.gpIndex-1)*(this.gpIndex-1)+(this.gpIndex-1))/2*5;
+        if(indexInTotal < filedsPerTriangle) {
+            const layerIndex = Math.floor((Math.sqrt(5)*Math.sqrt(8*indexInTotal+5)-5)/10);
+            indexInTotal -= (layerIndex*layerIndex+layerIndex)/2*5;
+            return [indexInTotal, layerIndex+1];
+        }
+        indexInTotal -= filedsPerTriangle;
+        const fieldsInRombus = this.gpIndex*(this.gpIndex+1)*5;
+        if(indexInTotal < fieldsInRombus) {
+            const layerIndex = Math.floor(indexInTotal/(this.gpIndex*5));
+            indexInTotal -= layerIndex*this.gpIndex*5;
+            return [indexInTotal, this.gpIndex+layerIndex];
+        }
+        indexInTotal -= fieldsInRombus;
+        if(indexInTotal < filedsPerTriangle) {
+            indexInTotal = filedsPerTriangle-indexInTotal-1;
+            const layerIndex = Math.floor((Math.sqrt(5)*Math.sqrt(8*indexInTotal+5)-5)/10);
+            indexInTotal -= (layerIndex*layerIndex+layerIndex)/2*5;
+            return [(layerIndex+1)*5-indexInTotal-1, this.gpIndex*3-layerIndex-1];
+        }
+        return [0, this.gpIndex*3]; // North Pole
+    }
+
     getFieldPosition3D(out, indexInLayer, layerIndex) {
         const offset = this.indexInLayerToIndexInTotal(indexInLayer, layerIndex)*3;
         for(let i = 0; i < 3; ++i)
@@ -604,6 +630,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
         const generateField = (indexInStripeLayer, stripeIndex, layerIndex) => {
             const isPole = this.isPole(indexInStripeLayer, layerIndex),
                   indexInLayer = this.indexInStripeLayerAndStripeIndexToIndexInLayer(indexInStripeLayer, stripeIndex, layerIndex),
+                  indexInTotal = this.indexInLayerToIndexInTotal(indexInLayer, layerIndex),
                   tileElement = createSvgElement('use', svgElement.childNodes[1]),
                   textElement = createSvgElement('text', svgElement.childNodes[2]),
                   borderElement = createSvgElement('use', svgElement.childNodes[2]);
