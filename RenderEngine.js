@@ -2,6 +2,8 @@ import {mat4} from './gl-matrix.js';
 import * as FirstPassShader from './FirstPassShader.js';
 import * as LastPassShader from './LastPassShader.js';
 
+const pixel = new Float32Array(4);
+
 export class RenderContext {
     constructor(canvas) {
         this.gl = canvas.getContext('webgl2');
@@ -20,25 +22,29 @@ export class RenderContext {
         // this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE);
         this.setViewport();
 
-        const depthBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST),
-              diffuseBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST),
-              positionBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST),
-              normalBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST),
-              frameBuffer = this.gl.createFramebuffer();
-        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, frameBuffer);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, depthBuffer);
+        this.depthBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
+        this.diffuseBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
+        this.positionBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
+        this.normalBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
+        this.texcoordBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
+        this.frameBuffer = this.gl.createFramebuffer();
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.frameBuffer);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, this.depthBuffer);
         this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.DEPTH_COMPONENT32F, this.gl.canvas.width, this.gl.canvas.height);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, positionBuffer);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionBuffer);
         this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGBA32F, this.gl.canvas.width, this.gl.canvas.height);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, normalBuffer);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, this.normalBuffer);
         this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGBA16F, this.gl.canvas.width, this.gl.canvas.height);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, diffuseBuffer);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, this.texcoordBuffer);
+        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RG16F, this.gl.canvas.width, this.gl.canvas.height);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, this.diffuseBuffer);
         this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGB8, this.gl.canvas.width, this.gl.canvas.height);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.DEPTH_ATTACHMENT, this.gl.TEXTURE_2D, depthBuffer, 0);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, positionBuffer, 0);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT1, this.gl.TEXTURE_2D, normalBuffer, 0);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT2, this.gl.TEXTURE_2D, diffuseBuffer, 0);
-        this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0, this.gl.COLOR_ATTACHMENT1, this.gl.COLOR_ATTACHMENT2]);
+        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.DEPTH_ATTACHMENT, this.gl.TEXTURE_2D, this.depthBuffer, 0);
+        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, this.positionBuffer, 0);
+        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT1, this.gl.TEXTURE_2D, this.normalBuffer, 0);
+        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT2, this.gl.TEXTURE_2D, this.texcoordBuffer, 0);
+        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT3, this.gl.TEXTURE_2D, this.diffuseBuffer, 0);
+        this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0, this.gl.COLOR_ATTACHMENT1, this.gl.COLOR_ATTACHMENT2, this.gl.COLOR_ATTACHMENT3]);
 
         this.fullScreenVertexArray = this.gl.createVertexArray();
         this.gl.bindVertexArray(this.fullScreenVertexArray);
@@ -52,13 +58,17 @@ export class RenderContext {
 
         this.firstPass = this.createProgram(FirstPassShader);
         this.lastPass = this.createProgram(LastPassShader);
+    }
 
+    startRenderLoop() {
+        if(this.renderLoop)
+            return;
         let lastTime = performance.now();
-        const step = (currentTime) => {
-            this.gl.enable(this.gl.CULL_FACE);
+        this.renderLoop = (currentTime) => {
+            // this.gl.enable(this.gl.CULL_FACE);
             this.gl.enable(this.gl.DEPTH_TEST);
             this.gl.useProgram(this.firstPass);
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, frameBuffer);
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.frameBuffer);
             this.gl.clear(this.gl.COLOR_BUFFER_BIT|this.gl.DEPTH_BUFFER_BIT);
             if(this.render)
                 this.render((currentTime-lastTime)*0.001);
@@ -66,15 +76,21 @@ export class RenderContext {
             this.gl.disable(this.gl.DEPTH_TEST);
             this.gl.useProgram(this.lastPass);
             this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-            this.bindTexture(0, positionBuffer);
-            this.bindTexture(1, normalBuffer);
-            this.bindTexture(2, diffuseBuffer);
+            this.bindTexture(0, this.positionBuffer);
+            this.bindTexture(1, this.normalBuffer);
+            // this.bindTexture(2, this.texcoordBuffer);
+            this.bindTexture(3, this.diffuseBuffer);
             this.gl.bindVertexArray(this.fullScreenVertexArray);
             this.gl.drawArrays(this.gl.TRIANGLE_FAN, 0, 4);
             lastTime = currentTime;
-            window.requestAnimationFrame(step);
+            if(this.renderLoop)
+                window.requestAnimationFrame(this.renderLoop);
         };
-        step(lastTime);
+        this.renderLoop(lastTime);
+    }
+
+    stopRenderLoop() {
+        delete this.renderLoop;
     }
 
     createShader(type, source) {
@@ -177,21 +193,32 @@ export class RenderContext {
         this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
     }
 
-    renderImageToTexture(destination, source) {
-        const image = new Image();
-        image.onload = () => {
-            this.gl.bindTexture(this.gl.TEXTURE_2D, destination);
-            this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, image);
-            this.gl.generateMipmap(this.gl.TEXTURE_2D);
-        };
-        image.src = (source instanceof SVGElement) ? 'data:image/svg+xml;base64,'+window.btoa(new XMLSerializer().serializeToString(source)) : source;
+    imageToTexture(destination, source, callback) {
+        return new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => {
+                this.gl.bindTexture(this.gl.TEXTURE_2D, destination);
+                this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, image);
+                this.gl.generateMipmap(this.gl.TEXTURE_2D);
+                resolve(image);
+            };
+            image.onerror = reject;
+            image.src = (source instanceof SVGElement) ? 'data:image/svg+xml;base64,'+window.btoa(new XMLSerializer().serializeToString(source)) : source;
+        });
     }
 
     setViewport() {
-        const devicePixelRatio = window.devicePixelRatio || 1;
-        this.gl.canvas.width = Math.round(this.gl.canvas.offsetWidth*devicePixelRatio);
-        this.gl.canvas.height = Math.round(this.gl.canvas.offsetHeight*devicePixelRatio);
+        this.devicePixelRatio = window.devicePixelRatio || 1;
+        this.gl.canvas.width = Math.round(this.gl.canvas.offsetWidth*this.devicePixelRatio);
+        this.gl.canvas.height = Math.round(this.gl.canvas.offsetHeight*this.devicePixelRatio);
         this.gl.viewport(0, 0, this.gl.canvas.width, this.gl.canvas.height);
+    }
+
+    getTexcoordAt(x, y) {
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.frameBuffer);
+        this.gl.readBuffer(this.gl.COLOR_ATTACHMENT2);
+        this.gl.readPixels(x, y, 1, 1, this.gl.RGBA, this.gl.FLOAT, pixel);
+        return [pixel[0], pixel[1]];
     }
 }
 

@@ -10,7 +10,8 @@ void main() {
 export const fragmentShader = `
 layout(binding=0) uniform sampler2D positionMap;
 layout(binding=1) uniform sampler2D normalMap;
-layout(binding=2) uniform sampler2D diffuseMap;
+layout(binding=2) uniform sampler2D texcoordMap;
+layout(binding=3) uniform sampler2D diffuseMap;
 in vec2 fTexcoord;
 layout(location=0) out vec4 color;
 

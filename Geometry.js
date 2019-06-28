@@ -111,19 +111,19 @@ export class IcosahedralClass1GoldbergPolyhedron {
         return indexInStripeLayer+stripeIndex*this.getFieldCountInStripeLayer(layerIndex);
     }
 
-    positionInLayerToIndexInStripeLayerAndStripeIndex(positionInLayer, layerIndex) {
+    indexInEquatorToIndexInStripeLayerAndStripeIndex(indexInEquator, layerIndex) {
         if(layerIndex > this.gpIndex*2)
-            positionInLayer -= layerIndex-this.gpIndex*2;
-        const stripeIndex = Math.floor(positionInLayer/this.gpIndex),
-              indexInStripeLayer = positionInLayer%this.gpIndex;
+            indexInEquator -= layerIndex-this.gpIndex*2;
+        const stripeIndex = Math.floor(indexInEquator/this.gpIndex),
+              indexInStripeLayer = indexInEquator%this.gpIndex;
         return [indexInStripeLayer, stripeIndex];
     }
 
-    indexInStripeLayerAndStripeIndexToPositionInLayer(indexInStripeLayer, stripeIndex, layerIndex) {
-        let positionInLayer = indexInStripeLayer+this.gpIndex*stripeIndex;
+    indexInStripeLayerAndStripeIndexToIndexInEquator(indexInStripeLayer, stripeIndex, layerIndex) {
+        let indexInEquator = indexInStripeLayer+this.gpIndex*stripeIndex;
         if(layerIndex > this.gpIndex*2)
-            positionInLayer += layerIndex-this.gpIndex*2;
-        return positionInLayer;
+            indexInEquator += layerIndex-this.gpIndex*2;
+        return indexInEquator;
     }
 
     getAntipodalIndexInLayerAndLayerIndex(indexInLayer, layerIndex) {
@@ -192,8 +192,8 @@ export class IcosahedralClass1GoldbergPolyhedron {
             --layerIndex;
         } else if(layerIndex == this.gpIndex*2 && indexInStripeLayer == 0 && stripeIndex == 0)
             stripeIndex += 5;
-        const positionInLayer = this.indexInStripeLayerAndStripeIndexToPositionInLayer(indexInStripeLayer, stripeIndex, layerIndex),
-              hexX = positionInLayer+0.5-this.gpIndex*0.5,
+        const indexInEquator = this.indexInStripeLayerAndStripeIndexToIndexInEquator(indexInStripeLayer, stripeIndex, layerIndex),
+              hexX = indexInEquator+0.5-this.gpIndex*0.5,
               hexY = this.gpIndex*3-layerIndex-1;
         out[0] = this.fieldWidth2D*(0.5*hexY+hexX);
         out[1] = this.fieldHeight2D*(0.75*hexY+0.5);
@@ -643,7 +643,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
             tileElement.setAttribute('href', (isPole) ? '#pentagon' : '#hexagon');
             textElement.setAttribute('transform', `translate(${position2D[0]},${position2D[1]+4})`);
             textElement.setAttribute('fill', '#000');
-            textElement.textContent = `${this.indexInStripeLayerAndStripeIndexToPositionInLayer(indexInStripeLayer, stripeIndex, layerIndex)} ${layerIndex}`;
+            textElement.textContent = `${this.indexInStripeLayerAndStripeIndexToIndexInEquator(indexInStripeLayer, stripeIndex, layerIndex)} ${layerIndex}`;
             borderElement.setAttribute('transform', transform);
             borderElement.setAttribute('fill', 'none');
             borderElement.setAttribute('stroke', '#000');
