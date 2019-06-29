@@ -126,6 +126,23 @@ export class IcosahedralClass1GoldbergPolyhedron {
         return indexInEquator;
     }
 
+    roundIndexInEquatorAndLayerIndex(indexInEquator, layerIndex) {
+        const y = layerIndex-indexInEquator;
+        let xInteger = Math.round(indexInEquator),
+            yInteger = Math.round(y),
+            zInteger = Math.round(layerIndex);
+        const xFrac = Math.abs(xInteger-indexInEquator),
+              yFrac = Math.abs(yInteger-y),
+              zFrac = Math.abs(layerIndex-zInteger);
+        if(xFrac > yFrac && xFrac > zFrac)
+            xInteger = zInteger-yInteger;
+        else if(yFrac > zFrac)
+            yInteger = zInteger-xInteger;
+        else
+            zInteger = xInteger+yInteger;
+        return [xInteger, zInteger];
+    }
+
     getAntipodalIndexInLayerAndLayerIndex(indexInLayer, layerIndex) {
         const newLayerIndex = this.gpIndex*3-layerIndex;
         indexInLayer += (layerIndex < this.gpIndex) ? layerIndex*3 :
@@ -192,11 +209,20 @@ export class IcosahedralClass1GoldbergPolyhedron {
             --layerIndex;
         } else if(layerIndex == this.gpIndex*2 && indexInStripeLayer == 0 && stripeIndex == 0)
             stripeIndex += 5;
-        const indexInEquator = this.indexInStripeLayerAndStripeIndexToIndexInEquator(indexInStripeLayer, stripeIndex, layerIndex),
-              hexX = indexInEquator+0.5-this.gpIndex*0.5,
-              hexY = this.gpIndex*3-layerIndex-1;
-        out[0] = this.fieldWidth2D*(0.5*hexY+hexX);
-        out[1] = this.fieldHeight2D*(0.75*hexY+0.5);
+        const indexInEquator = this.indexInStripeLayerAndStripeIndexToIndexInEquator(indexInStripeLayer, stripeIndex, layerIndex);
+        out[0] = this.fieldWidth2D*(0.5*(this.gpIndex*2-layerIndex)+indexInEquator);
+        out[1] = this.fieldHeight2D*(0.75*(this.gpIndex*3-layerIndex-1)+0.5);
+    }
+
+    position2DToIndexInEquator(position) {
+        let layerIndex = this.gpIndex*3-1-(position[1]/this.fieldHeight2D-0.5)/0.75,
+            indexInEquator = position[0]/this.fieldWidth2D-0.5*(this.gpIndex*2-layerIndex);
+        [indexInEquator, layerIndex] = this.roundIndexInEquatorAndLayerIndex(indexInEquator, layerIndex);
+        if(indexInEquator == this.gpIndex*5)
+            return (layerIndex == this.gpIndex*3-1) ? [this.gpIndex, this.gpIndex*3] : [0, this.gpIndex*2];
+        else if(indexInEquator == -1)
+            return [0, 0];
+        return [indexInEquator, layerIndex];
     }
 
     getBorderTexcoord(out, fieldPosition2D, direction, hemisphere) {
