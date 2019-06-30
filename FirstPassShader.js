@@ -12,10 +12,15 @@ out vec3 fNormal;
 out vec2 fTexcoord;
 
 void main() {
-    float yAngle = (vTexcoord.x-0.5)*widthInRadians-radians(20.0);
+    float xPos = widthInRadians*0.5*smoothstep(0.0, 1.0, unfold-1.0);
+    float yAngle = (vTexcoord.x-0.5)*widthInRadians;
+    float xSign = sign(yAngle);
+    bool onTheRoll = xPos < abs(yAngle);
+    yAngle = (onTheRoll) ? yAngle-xPos*xSign : 0.0;
     vec4 cylindricProjection = vec4(sin(yAngle)*sphereRadius, -(vTexcoord.y-0.5)*sphereRadius*3.2, cos(yAngle)*sphereRadius, 1.0);
-    vec4 textureProjection = vec4((vTexcoord.x-0.5)*sphereRadius*widthInRadians, cylindricProjection.y, 0.0, 1.0);
-    vec4 positionInWorld = worldMatrix*mix(mix(vPosition, cylindricProjection, smoothstep(0.0, 1.0, unfold)), textureProjection, smoothstep(0.0, 1.0, unfold-1.0));
+    vec4 positionInWorld = mix(vPosition, cylindricProjection, smoothstep(0.0, 1.0, unfold));
+    positionInWorld.x += sphereRadius*((onTheRoll) ? xPos*xSign : widthInRadians*(vTexcoord.x-0.5));
+    positionInWorld = worldMatrix*positionInWorld;
     gl_Position = projectionMatrix*positionInWorld;
     fPosition = positionInWorld.xyz;
     fNormal = normalMatrix*vNormal;

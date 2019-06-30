@@ -65,12 +65,13 @@ function createSvgCanvas() {
 }
 
 export class IcosahedralClass1GoldbergPolyhedron {
-    constructor(abandon, fieldsHaveCenterVertex, gpIndex, edgeLength3D, edgeLength2D) {
+    constructor(abandon, fieldsHaveCenterVertex, gpIndex, edgeLength3D, edgeLength2D, yRotation=0.0) {
         this.abandon = abandon; // One of ['curvature', 'size', 'shape']
+        this.fieldsHaveCenterVertex = fieldsHaveCenterVertex; // Defines if fields have an additional vertex at their center or are flat instead
         this.gpIndex = gpIndex; // Number of fields along the edge between two poles (including one of the two poles)
-        this.edgeLength3D = edgeLength3D;
-        this.edgeLength2D = edgeLength2D;
-        this.fieldsHaveCenterVertex = fieldsHaveCenterVertex;
+        this.edgeLength3D = edgeLength3D; // Edge length of the hexagons and pentagons in 3D
+        this.edgeLength2D = edgeLength2D; // Edge length of the hexagons and pentagons in 2D
+        this.yRotation = yRotation; // Rotates the generated 3D positions by this angle
     }
 
     getBorderVertexCountPerEdgeAtLayer(layerIndex) {
@@ -366,7 +367,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
               pentagonY = 1.0/Math.sqrt(5.0)*this.sphereRadius,
               pentagonRadius = 2.0/Math.sqrt(5.0)*this.sphereRadius;
         for(let i = 0; i < 5; ++i) {
-            const angle = i*Math.PI*2.0/5.0;
+            const angle = this.yRotation+i*Math.PI*2.0/5.0;
             position[0] = Math.sin(angle)*pentagonRadius;
             position[1] = pentagonY;
             position[2] = Math.cos(angle)*pentagonRadius;

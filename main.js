@@ -5,7 +5,7 @@ import {RenderContext, Camera} from './RenderEngine.js';
 const canvas = document.getElementById('canvas'),
       unfoldSlider = document.getElementById('unfold'),
       renderContext = new RenderContext(canvas),
-      polyhedron = new IcosahedralClass1GoldbergPolyhedron('shape', false, 10, 1.0, 30.0),
+      polyhedron = new IcosahedralClass1GoldbergPolyhedron('shape', false, 10, 1.0, 30.0, Math.PI/9.0),
       camera = new Camera(),
       rotationVelocity = quat.create(),
       rotation = quat.create(),
