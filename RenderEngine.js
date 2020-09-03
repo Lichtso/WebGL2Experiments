@@ -1,50 +1,29 @@
-import {mat4} from './gl-matrix.js';
-import * as FirstPassShader from './FirstPassShader.js';
-import * as LastPassShader from './LastPassShader.js';
+import {vec3, mat4} from './gl-matrix/index.js';
+import * as ClearShader from './ClearShader.js';
+import * as SurfaceShader from './SurfaceShader.js';
+import * as CombineShader from './CombineShader.js';
 
-const pixel = new Float32Array(4);
+const pixel = new Uint32Array(4);
 
 export class RenderContext {
     constructor(canvas) {
         this.gl = canvas.getContext('webgl2');
-        if(!this.gl) {
-            console.log('WebGL 2 not supported');
-            return;
-        }
-        if(!this.gl.getExtension('EXT_color_buffer_float')) {
-            console.log('EXT_color_buffer_float not supported');
-            return;
-        }
-        this.gl.clearColor(0, 0, 0, 1);
+        if(!this.gl)
+            throw new Error(`WebGL 2 is not supported`);
+        this.requireExtension('EXT_color_buffer_float');
         this.gl.frontFace(this.gl.CCW);
         this.gl.depthFunc(this.gl.LESS);
-        // this.gl.enable(gl.BLEND);
-        // this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE);
         this.setViewport();
 
-        this.depthBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
-        this.diffuseBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
-        this.positionBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
-        this.normalBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
-        this.texcoordBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
         this.frameBuffer = this.gl.createFramebuffer();
         this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.frameBuffer);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, this.depthBuffer);
-        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.DEPTH_COMPONENT32F, this.gl.canvas.width, this.gl.canvas.height);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, this.positionBuffer);
-        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGBA32F, this.gl.canvas.width, this.gl.canvas.height);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, this.normalBuffer);
-        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGBA16F, this.gl.canvas.width, this.gl.canvas.height);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, this.texcoordBuffer);
-        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RG16F, this.gl.canvas.width, this.gl.canvas.height);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, this.diffuseBuffer);
-        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGB8, this.gl.canvas.width, this.gl.canvas.height);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.DEPTH_ATTACHMENT, this.gl.TEXTURE_2D, this.depthBuffer, 0);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, this.positionBuffer, 0);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT1, this.gl.TEXTURE_2D, this.normalBuffer, 0);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT2, this.gl.TEXTURE_2D, this.texcoordBuffer, 0);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT3, this.gl.TEXTURE_2D, this.diffuseBuffer, 0);
-        this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0, this.gl.COLOR_ATTACHMENT1, this.gl.COLOR_ATTACHMENT2, this.gl.COLOR_ATTACHMENT3]);
+        this.depthBuffer = this.createFramebufferAttachment(this.gl.DEPTH_ATTACHMENT, this.gl.DEPTH_COMPONENT32F);
+        this.gBuffers = [
+            this.createFramebufferAttachment(this.gl.COLOR_ATTACHMENT0, this.gl.RGB8), // Color
+            this.createFramebufferAttachment(this.gl.COLOR_ATTACHMENT1, this.gl.RGBA32F), // Position
+            this.createFramebufferAttachment(this.gl.COLOR_ATTACHMENT2, this.gl.RGBA16I), // Normal
+            this.createFramebufferAttachment(this.gl.COLOR_ATTACHMENT3, this.gl.RG16UI) // Texcoord
+        ];
 
         this.fullScreenVertexArray = this.gl.createVertexArray();
         this.gl.bindVertexArray(this.fullScreenVertexArray);
@@ -55,9 +34,34 @@ export class RenderContext {
         this.gl.vertexAttribPointer(0, 2, this.gl.FLOAT, false, 0, 0);
         this.gl.bindVertexArray(null);
         this.gl.deleteBuffer(vertexBuffer);
+        this.fullScreenSampler = this.gl.createSampler();
+        this.gl.samplerParameteri(this.fullScreenSampler, this.gl.TEXTURE_MIN_FILTER, this.gl.NEAREST);
+        this.gl.samplerParameteri(this.fullScreenSampler, this.gl.TEXTURE_MAG_FILTER, this.gl.NEAREST);
+        this.gl.samplerParameteri(this.fullScreenSampler, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+        this.gl.samplerParameteri(this.fullScreenSampler, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
 
-        this.firstPass = this.createProgram(FirstPassShader);
-        this.lastPass = this.createProgram(LastPassShader);
+        this.clearShader = this.createProgram(ClearShader);
+        this.surfaceShader = this.createProgram(SurfaceShader);
+        this.combineShader = this.createProgram(CombineShader);
+
+        this.sunLightDirection = vec3.fromValues(-1.0, 0.0, -1.0);
+        this.camera = new Camera();
+    }
+
+    requireExtension(name) {
+        const extension = this.gl.getExtension(name),
+              prefix = name.split('_')[0];
+        if(!extension)
+            throw new Error(`WebGL extension ${name} is not supported`);
+        for(const srcKey in extension) {
+            const isFunction = (typeof(extension[srcKey]) == 'function');
+            this.gl[isFunction
+                ? srcKey.substring(0, srcKey.length-prefix.length)
+                : srcKey.substring(prefix.length+1)
+            ] = isFunction
+                ? (...parameters) => extension[srcKey].apply(extension, parameters)
+                : extension[srcKey];
+        }
     }
 
     startRenderLoop() {
@@ -65,23 +69,36 @@ export class RenderContext {
             return;
         let lastTime = performance.now();
         this.renderLoop = (currentTime) => {
-            // this.gl.enable(this.gl.CULL_FACE);
-            this.gl.enable(this.gl.DEPTH_TEST);
-            this.gl.useProgram(this.firstPass);
             this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.frameBuffer);
-            this.gl.clear(this.gl.COLOR_BUFFER_BIT|this.gl.DEPTH_BUFFER_BIT);
-            if(this.render)
-                this.render((currentTime-lastTime)*0.001);
-            this.gl.disable(this.gl.CULL_FACE);
-            this.gl.disable(this.gl.DEPTH_TEST);
-            this.gl.useProgram(this.lastPass);
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-            this.bindTexture(0, this.positionBuffer);
-            this.bindTexture(1, this.normalBuffer);
-            // this.bindTexture(2, this.texcoordBuffer);
-            this.bindTexture(3, this.diffuseBuffer);
+            this.gl.depthMask(true);
+            this.gl.clear(this.gl.DEPTH_BUFFER_BIT);
+            this.gl.useProgram(this.clearShader);
             this.gl.bindVertexArray(this.fullScreenVertexArray);
             this.gl.drawArrays(this.gl.TRIANGLE_FAN, 0, 4);
+            // this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0]);
+            // this.gl.clear(this.gl.COLOR_BUFFER_BIT|this.gl.DEPTH_BUFFER_BIT);
+            // this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0, this.gl.COLOR_ATTACHMENT1, this.gl.COLOR_ATTACHMENT2, this.gl.COLOR_ATTACHMENT3]);
+            // this.gl.enable(this.gl.CULL_FACE);
+            this.gl.enable(this.gl.DEPTH_TEST);
+            this.gl.bindSampler(0, null);
+            this.gl.useProgram(this.surfaceShader);
+            this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0, this.gl.COLOR_ATTACHMENT1, this.gl.COLOR_ATTACHMENT2, this.gl.COLOR_ATTACHMENT3]);
+            if(this.renderSurface)
+                this.renderSurface((currentTime-lastTime)*0.001);
+            this.gl.disable(this.gl.CULL_FACE);
+            this.gl.disable(this.gl.DEPTH_TEST);
+            this.gl.depthMask(false);
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+            this.gl.useProgram(this.combineShader);
+            this.gl.uniform3fv(this.gl.getUniformLocation(this.combineShader, 'sunLightDirection'), this.sunLightDirection);
+            for(let i = 0; i < 4; ++i) {
+                this.gl.bindSampler(i, this.fullScreenSampler);
+                this.bindTexture(i, this.gBuffers[i]);
+            }
+            this.gl.bindVertexArray(this.fullScreenVertexArray);
+            this.gl.drawArrays(this.gl.TRIANGLE_FAN, 0, 4);
+            if(this.renderVolume)
+                this.renderVolume();
             lastTime = currentTime;
             if(this.renderLoop)
                 window.requestAnimationFrame(this.renderLoop);
@@ -178,14 +195,11 @@ export class RenderContext {
         return texture;
     }
 
-    createDepthMap() {
-        const depthBuffer = this.createTexture(this.gl.NEAREST, this.gl.NEAREST);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, depthBuffer);
-        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.DEPTH_COMPONENT32F, this.gl.canvas.width, this.gl.canvas.height);
-        // gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.DEPTH_COMPONENT32F, this.gl.canvas.width, this.gl.canvas.height, 0, this.gl.DEPTH_COMPONENT, this.gl.FLOAT, null);
-        const frameBuffer = this.gl.createFramebuffer();
-        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, frameBuffer);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.DEPTH_ATTACHMENT, this.gl.TEXTURE_2D, depthBuffer, 0);
+    createFramebufferAttachment(attachment, internalformat, texture=this.gl.createTexture()) {
+        this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, internalformat, this.gl.canvas.width, this.gl.canvas.height);
+        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, attachment, this.gl.TEXTURE_2D, texture, 0);
+        return texture;
     }
 
     bindTexture(slotIndex, texture) {
@@ -216,9 +230,9 @@ export class RenderContext {
 
     getTexcoordAt(x, y) {
         this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.frameBuffer);
-        this.gl.readBuffer(this.gl.COLOR_ATTACHMENT2);
-        this.gl.readPixels(x, y, 1, 1, this.gl.RGBA, this.gl.FLOAT, pixel);
-        return [pixel[0], pixel[1]];
+        this.gl.readBuffer(this.gl.COLOR_ATTACHMENT3);
+        this.gl.readPixels(x, y, 1, 1, this.gl.RGBA_INTEGER, this.gl.UNSIGNED_INT, pixel);
+        return [pixel[0]/65535.0, pixel[1]/65535.0];
     }
 }
 
@@ -228,6 +242,7 @@ export class Camera {
         this.far = 1000.0;
         this.worldMatrix = mat4.create();
         this.projectionMatrix = mat4.create();
+        this.inverseCombinedMatrix = mat4.create();
         this.combinedMatrix = mat4.create();
     }
 
@@ -242,5 +257,6 @@ export class Camera {
     update() {
         mat4.invert(this.combinedMatrix, this.worldMatrix);
         mat4.multiply(this.combinedMatrix, this.projectionMatrix, this.combinedMatrix);
+        mat4.invert(this.inverseCombinedMatrix, this.combinedMatrix);
     }
 }

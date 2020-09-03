@@ -1,8 +1,8 @@
-import {vec2, vec3} from './gl-matrix.js';
+import {vec2, vec3} from './gl-matrix/index.js';
 
-const hexWrenchFactor = Math.sqrt(3.0), // 2.0*Math.sin(Math.PI/6.0)
-      pentagonRadiusByHexRadius = 1.0/(2.0*Math.sin(Math.PI/5.0)), // Math.sin(0.3*Math.PI)/Math.sin(0.4*Math.PI)
-      icosahedronRadiusByEdgeLength = Math.sin(Math.PI*2.0/5.0); // 0.25*Math.sqrt(10.0+2.0*Math.sqrt(5.0))
+export const hexWrenchFactor = Math.sqrt(3.0), // 2.0*Math.sin(Math.PI/6.0)
+             pentagonRadiusByHexRadius = 1.0/(2.0*Math.sin(Math.PI/5.0)), // Math.sin(0.3*Math.PI)/Math.sin(0.4*Math.PI)
+             icosahedronRadiusByEdgeLength = Math.sin(Math.PI*2.0/5.0); // 0.25*Math.sqrt(10.0+2.0*Math.sqrt(5.0))
 
 function vec3Slerp(out, a, b, t) {
     const cos = vec3.dot(a, b)/vec3.dot(a, a),

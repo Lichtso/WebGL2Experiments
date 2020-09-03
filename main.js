@@ -1,28 +1,17 @@
-import {vec2, vec3, quat, mat3, mat4} from './gl-matrix.js';
-import {IcosahedralClass1GoldbergPolyhedron} from './Geometry.js';
+import {vec2, vec3, quat, mat4} from './gl-matrix/index.js';
 import {RenderContext, Camera} from './RenderEngine.js';
 
 const canvas = document.getElementById('canvas'),
       unfoldSlider = document.getElementById('unfold'),
       renderContext = new RenderContext(canvas),
-      polyhedron = new IcosahedralClass1GoldbergPolyhedron('shape', false, 10, 1.0, 30.0, Math.PI/9.0),
-      camera = new Camera(),
       rotationVelocity = quat.create(),
       rotation = quat.create(),
-      worldMatrix = mat4.create(),
-      normalMatrix = mat3.create(),
       rotationAxis = vec3.create();
-polyhedron.generateGeometry();
-const [vertices, elements] = polyhedron.generateTopologyAndTexcoords();
-polyhedron.vertexArray = renderContext.createVertexArray(vertices, elements);
-polyhedron.texture = renderContext.createTexture();
-renderContext.imageToTexture(polyhedron.texture, polyhedron.generateTextureImage()).then(renderContext.startRenderLoop.bind(renderContext));
-renderContext.gl.useProgram(renderContext.firstPass);
-renderContext.gl.uniform1f(renderContext.gl.getUniformLocation(renderContext.firstPass, 'sphereRadius'), polyhedron.sphereRadius);
-renderContext.gl.uniform1f(renderContext.gl.getUniformLocation(renderContext.firstPass, 'widthInRadians'), polyhedron.textureWidth/(polyhedron.fieldWidth2D*polyhedron.gpIndex*5)*Math.PI*2.0);
-mat4.translate(camera.worldMatrix, camera.worldMatrix, [0, 0, 100]);
-camera.setPerspective(45/180*Math.PI, renderContext.gl.canvas.width/renderContext.gl.canvas.height);
-camera.update();
+renderContext.camera.setPerspective(45/180*Math.PI, renderContext.gl.canvas.width/renderContext.gl.canvas.height);
+renderContext.camera.update();
+const hoverHandler = canvas.onmousemove = (event) => {
+
+};
 canvas.onmousedown = (event) => {
     const dragOrigin = vec2.fromValues(event.pageX, event.pageY),
           prevRotation = quat.clone(rotation);
@@ -37,24 +26,24 @@ canvas.onmousedown = (event) => {
     };
 };
 canvas.onmouseup = canvas.onmouseout = (event) => {
-    canvas.onmousemove = undefined;
+    canvas.onmousemove = hoverHandler;
 };
-renderContext.render = (deltaTime) => {
+renderContext.renderSurface = (deltaTime) => {
     const angularVelocity = quat.getAxisAngle(rotationAxis, rotationVelocity)*0.9;
     quat.setAxisAngle(rotationVelocity, rotationAxis, angularVelocity);
     if(angularVelocity < 0.001)
         renderContext.stopRenderLoop();
     quat.multiply(rotation, rotationVelocity, rotation);
     quat.normalize(rotation, rotation);
-    mat4.fromQuat(worldMatrix, rotation);
-    mat3.fromMat4(normalMatrix, worldMatrix);
-    renderContext.gl.uniformMatrix4fv(renderContext.gl.getUniformLocation(renderContext.firstPass, 'worldMatrix'), false, worldMatrix);
-    renderContext.gl.uniformMatrix3fv(renderContext.gl.getUniformLocation(renderContext.firstPass, 'normalMatrix'), false, normalMatrix);
-    renderContext.gl.uniformMatrix4fv(renderContext.gl.getUniformLocation(renderContext.firstPass, 'projectionMatrix'), false, camera.combinedMatrix);
-    renderContext.gl.uniform1f(renderContext.gl.getUniformLocation(renderContext.firstPass, 'unfold'), unfoldSlider.value);
-    renderContext.bindTexture(0, polyhedron.texture);
-    renderContext.gl.bindVertexArray(polyhedron.vertexArray);
-    renderContext.gl.drawElements(renderContext.gl.TRIANGLE_FAN, polyhedron.fieldCount*polyhedron.elementsPerField, renderContext.gl.UNSIGNED_SHORT, 0);
+
+    mat4.fromQuat(renderContext.camera.worldMatrix, rotation);
+    mat4.invert(renderContext.camera.worldMatrix, renderContext.camera.worldMatrix);
+    mat4.translate(renderContext.camera.worldMatrix, renderContext.camera.worldMatrix, [0, 0, 100]);
+    renderContext.camera.update();
+
+};
+renderContext.renderVolume = () => {
+
 };
 unfoldSlider.oninput = renderContext.startRenderLoop.bind(renderContext);
 document.body.onkeydown = (event) => {
