@@ -72,6 +72,8 @@ export class IcosahedralClass1GoldbergPolyhedron {
         this.edgeLength3D = edgeLength3D; // Edge length of the hexagons and pentagons in 3D
         this.edgeLength2D = edgeLength2D; // Edge length of the hexagons and pentagons in 2D
         this.yRotation = yRotation; // Rotates the generated 3D positions by this angle
+        this.icosahedronEdgeLength = this.gpIndex*this.edgeLength3D*hexWrenchFactor;
+        this.sphereRadius = this.icosahedronEdgeLength*icosahedronRadiusByEdgeLength;
     }
 
     getBorderVertexCountPerEdgeAtLayer(layerIndex) {
@@ -95,8 +97,53 @@ export class IcosahedralClass1GoldbergPolyhedron {
         return indexInLayer%this.getFieldCountInLayer(layerIndex);
     }
 
-    isPole(indexInStripeLayer, layerIndex) {
-        return (indexInStripeLayer == 0 && layerIndex%this.gpIndex == 0);
+    barycentricCubeCoordinates(indexInStripeLayer, stripeIndex, layerIndex) {
+        const result =
+            (layerIndex > 2*this.gpIndex) ? [3*this.gpIndex-layerIndex-indexInStripeLayer, 0, layerIndex-2*this.gpIndex, 15+stripeIndex] :
+            (layerIndex < this.gpIndex) ? [indexInStripeLayer, 0, this.gpIndex-layerIndex, stripeIndex] :
+            (indexInStripeLayer+this.gpIndex < layerIndex) ? [indexInStripeLayer, 0, 2*this.gpIndex-layerIndex, 10+stripeIndex] :
+            [this.gpIndex-indexInStripeLayer, 0, layerIndex-this.gpIndex, 5+stripeIndex];
+        result[1] = this.gpIndex-(result[0]+result[2]);
+        return result;
+    }
+
+    distToClosestPole(barycentricCubeCoordinates) {
+        return this.gpIndex-Math.max(Math.max(barycentricCubeCoordinates[0], barycentricCubeCoordinates[1]), barycentricCubeCoordinates[2]);
+    }
+
+    closestPole(barycentricCubeCoordinates) {
+        const maxCoord = Math.max(Math.max(barycentricCubeCoordinates[0], barycentricCubeCoordinates[1]), barycentricCubeCoordinates[2]),
+              stripeIndex = barycentricCubeCoordinates[3]%5;
+        switch(Math.floor(barycentricCubeCoordinates[3]/5)) {
+            case 3:
+                if(barycentricCubeCoordinates[0] == maxCoord)
+                    return 6+stripeIndex;
+                else if(barycentricCubeCoordinates[1] == maxCoord)
+                    return 6+(stripeIndex+1)%5;
+                else // if(barycentricCubeCoordinates[2] == maxCoord)
+                    return 11;
+            case 2:
+                if(barycentricCubeCoordinates[0] == maxCoord)
+                    return 6+(stripeIndex+1)%5;
+                else if(barycentricCubeCoordinates[1] == maxCoord)
+                    return 6+stripeIndex;
+                else // if(barycentricCubeCoordinates[2] == maxCoord)
+                    return 1+stripeIndex;
+            case 1:
+                if(barycentricCubeCoordinates[0] == maxCoord)
+                    return 1+stripeIndex;
+                else if(barycentricCubeCoordinates[1] == maxCoord)
+                    return 1+(stripeIndex+1)%5;
+                else // if(barycentricCubeCoordinates[2] == maxCoord)
+                    return 6+(stripeIndex+1)%5;
+            case 0:
+                if(barycentricCubeCoordinates[0] == maxCoord)
+                    return 1+(stripeIndex+1)%5;
+                else if(barycentricCubeCoordinates[1] == maxCoord)
+                    return 1+stripeIndex;
+                else // if(barycentricCubeCoordinates[2] == maxCoord)
+                    return 0;
+        }
     }
 
     indexInLayerToIndexInStripeLayerAndStripeIndex(indexInLayer, layerIndex) {
@@ -112,27 +159,27 @@ export class IcosahedralClass1GoldbergPolyhedron {
         return indexInStripeLayer+stripeIndex*this.getFieldCountInStripeLayer(layerIndex);
     }
 
-    indexInEquatorToIndexInStripeLayerAndStripeIndex(indexInEquator, layerIndex) {
+    indexAtEquatorToIndexInStripeLayerAndStripeIndex(indexAtEquator, layerIndex) {
         if(layerIndex > this.gpIndex*2)
-            indexInEquator -= layerIndex-this.gpIndex*2;
-        const stripeIndex = Math.floor(indexInEquator/this.gpIndex),
-              indexInStripeLayer = indexInEquator%this.gpIndex;
+            indexAtEquator -= layerIndex-this.gpIndex*2;
+        const stripeIndex = Math.floor(indexAtEquator/this.gpIndex),
+              indexInStripeLayer = indexAtEquator%this.gpIndex;
         return [indexInStripeLayer, stripeIndex];
     }
 
-    indexInStripeLayerAndStripeIndexToIndexInEquator(indexInStripeLayer, stripeIndex, layerIndex) {
-        let indexInEquator = indexInStripeLayer+this.gpIndex*stripeIndex;
+    indexInStripeLayerAndStripeIndexToIndexAtEquator(indexInStripeLayer, stripeIndex, layerIndex) {
+        let indexAtEquator = indexInStripeLayer+this.gpIndex*stripeIndex;
         if(layerIndex > this.gpIndex*2)
-            indexInEquator += layerIndex-this.gpIndex*2;
-        return indexInEquator;
+            indexAtEquator += layerIndex-this.gpIndex*2;
+        return indexAtEquator;
     }
 
-    roundIndexInEquatorAndLayerIndex(indexInEquator, layerIndex) {
-        const y = layerIndex-indexInEquator;
-        let xInteger = Math.round(indexInEquator),
+    roundIndexAtEquatorAndLayerIndex(indexAtEquator, layerIndex) {
+        const y = layerIndex-indexAtEquator;
+        let xInteger = Math.round(indexAtEquator),
             yInteger = Math.round(y),
             zInteger = Math.round(layerIndex);
-        const xFrac = Math.abs(xInteger-indexInEquator),
+        const xFrac = Math.abs(xInteger-indexAtEquator),
               yFrac = Math.abs(yInteger-y),
               zFrac = Math.abs(layerIndex-zInteger);
         if(xFrac > yFrac && xFrac > zFrac)
@@ -210,20 +257,20 @@ export class IcosahedralClass1GoldbergPolyhedron {
             --layerIndex;
         } else if(layerIndex == this.gpIndex*2 && indexInStripeLayer == 0 && stripeIndex == 0)
             stripeIndex += 5;
-        const indexInEquator = this.indexInStripeLayerAndStripeIndexToIndexInEquator(indexInStripeLayer, stripeIndex, layerIndex);
-        out[0] = this.fieldWidth2D*(0.5*(this.gpIndex*2-layerIndex)+indexInEquator);
+        const indexAtEquator = this.indexInStripeLayerAndStripeIndexToIndexAtEquator(indexInStripeLayer, stripeIndex, layerIndex);
+        out[0] = this.fieldWidth2D*(0.5*(this.gpIndex*2-layerIndex)+indexAtEquator);
         out[1] = this.fieldHeight2D*(0.75*(this.gpIndex*3-layerIndex-1)+0.5);
     }
 
-    position2DToIndexInEquator(position) {
+    position2DToIndexAtEquator(position) {
         let layerIndex = this.gpIndex*3-1-(position[1]/this.fieldHeight2D-0.5)/0.75,
-            indexInEquator = position[0]/this.fieldWidth2D-0.5*(this.gpIndex*2-layerIndex);
-        [indexInEquator, layerIndex] = this.roundIndexInEquatorAndLayerIndex(indexInEquator, layerIndex);
-        if(indexInEquator == this.gpIndex*5)
+            indexAtEquator = position[0]/this.fieldWidth2D-0.5*(this.gpIndex*2-layerIndex);
+        [indexAtEquator, layerIndex] = this.roundIndexAtEquatorAndLayerIndex(indexAtEquator, layerIndex);
+        if(indexAtEquator == this.gpIndex*5)
             return (layerIndex == this.gpIndex*3-1) ? [this.gpIndex, this.gpIndex*3] : [0, this.gpIndex*2];
-        else if(indexInEquator == -1)
+        else if(indexAtEquator == -1)
             return [0, 0];
-        return [indexInEquator, layerIndex];
+        return [indexAtEquator, layerIndex];
     }
 
     getBorderTexcoord(out, fieldPosition2D, direction, hemisphere) {
@@ -263,8 +310,6 @@ export class IcosahedralClass1GoldbergPolyhedron {
 
     generateGeometry() {
         // Initialize buffers, variables and constants
-        this.icosahedronEdgeLength = this.gpIndex*this.edgeLength3D*hexWrenchFactor;
-        this.sphereRadius = this.icosahedronEdgeLength*icosahedronRadiusByEdgeLength;
         this.fieldCount = this.gpIndex*this.gpIndex*10+2;
         this.borderVertexCount = this.gpIndex*this.gpIndex*20;
         this.vertexCount = this.fieldCount+this.borderVertexCount;
@@ -655,9 +700,11 @@ export class IcosahedralClass1GoldbergPolyhedron {
         svgElement.childNodes[0].childNodes[2].setAttribute('stroke-width', 2.0/this.edgeLength2D);
         const position2D = vec2.create();
         const generateField = (indexInStripeLayer, stripeIndex, layerIndex) => {
-            const isPole = this.isPole(indexInStripeLayer, layerIndex),
-                  indexInLayer = this.indexInStripeLayerAndStripeIndexToIndexInLayer(indexInStripeLayer, stripeIndex, layerIndex),
-                  indexInTotal = this.indexInLayerToIndexInTotal(indexInLayer, layerIndex),
+            const indexAtEquator = this.indexInStripeLayerAndStripeIndexToIndexAtEquator(indexInStripeLayer, stripeIndex, layerIndex),
+                  barycentricCubeCoordinates = this.barycentricCubeCoordinates(indexInStripeLayer, stripeIndex, layerIndex),
+                  distToClosestPole = this.distToClosestPole(barycentricCubeCoordinates),
+                  isPole = (distToClosestPole == 0),
+                  closestPole = this.closestPole(barycentricCubeCoordinates),
                   tileElement = createSvgElement('use', svgElement.childNodes[1]),
                   textElement = createSvgElement('text', svgElement.childNodes[2]),
                   borderElement = createSvgElement('use', svgElement.childNodes[2]);
@@ -670,7 +717,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
             tileElement.setAttribute('href', (isPole) ? '#pentagon' : '#hexagon');
             textElement.setAttribute('transform', `translate(${position2D[0]},${position2D[1]+4})`);
             textElement.setAttribute('fill', '#000');
-            textElement.textContent = `${this.indexInStripeLayerAndStripeIndexToIndexInEquator(indexInStripeLayer, stripeIndex, layerIndex)} ${layerIndex}`;
+            textElement.textContent = `${indexAtEquator} ${layerIndex}`;
             borderElement.setAttribute('transform', transform);
             borderElement.setAttribute('fill', 'none');
             borderElement.setAttribute('stroke', '#000');
