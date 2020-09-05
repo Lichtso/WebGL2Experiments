@@ -2,6 +2,8 @@ import {vec3, mat4} from './gl-matrix/index.js';
 import * as ClearShader from './ClearShader.js';
 import * as SurfaceShader from './SurfaceShader.js';
 import * as CombineShader from './CombineShader.js';
+import * as AtmosphereDensityShader from './AtmosphereDensityShader.js';
+import * as AtmosphereScatteringShader from './AtmosphereScatteringShader.js';
 
 const pixel = new Uint32Array(4);
 
@@ -43,6 +45,8 @@ export class RenderContext {
         this.clearShader = this.createProgram(ClearShader);
         this.surfaceShader = this.createProgram(SurfaceShader);
         this.combineShader = this.createProgram(CombineShader);
+        this.atmosphereDensityShader = this.createProgram(AtmosphereDensityShader);
+        this.atmosphereScatteringShader = this.createProgram(AtmosphereScatteringShader);
 
         this.sunLightDirection = vec3.fromValues(-1.0, 0.0, -1.0);
         this.camera = new Camera();
