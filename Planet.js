@@ -8,13 +8,13 @@ const combinedMatrix = mat4.create();
 export class Planet {
     constructor(renderContext, gpIndex) {
         this.worldMatrix = mat4.create();
-        this.surfacePolyhedron = new IcosahedralClass1GoldbergPolyhedron('shape', false, gpIndex, 1.0, 30.0, Math.PI/9.0);
+        this.surfacePolyhedron = new IcosahedralClass1GoldbergPolyhedron('shape', false, gpIndex, 1.0, 30.0, Math.PI*5.5/5.0);
         this.planetRadius = this.surfacePolyhedron.sphereRadius;
         this.atmosphereRadius = this.planetRadius*1.2;
         this.atmosphereDensityFalloff = 4.0;
         const atmosphereGpIndex = 2,
               atmosphereEdgeLength3D = this.atmosphereRadius/(atmosphereGpIndex*hexWrenchFactor*icosahedronRadiusByEdgeLength);
-        this.atmospherePolyhedron = new IcosahedralClass1GoldbergPolyhedron('shape', true, atmosphereGpIndex, atmosphereEdgeLength3D, 0.0, Math.PI/9.0);
+        this.atmospherePolyhedron = new IcosahedralClass1GoldbergPolyhedron('shape', true, atmosphereGpIndex, atmosphereEdgeLength3D, 0.0, 0.0);
         this.generateSurfaceGeometry(renderContext);
         this.generateSurfaceTexture(renderContext);
         this.generateAtmosphereGeometry(renderContext);

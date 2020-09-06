@@ -64,6 +64,303 @@ function createSvgCanvas() {
     }
 }
 
+export class LayerCoordinates {
+    constructor(gpIndex, indexInLayer=0, longitude=0) {
+        this.gpIndex = gpIndex;
+        this.setIndexInLayerAndLongitude(indexInLayer, longitude);
+    }
+
+    setIndexInLayerAndLongitude(indexInLayer, longitude) {
+        this.longitude = longitude;
+        this.indexInLayer = indexInLayer;
+    }
+
+    setSpiralCoordinates(spiralCoordinates) {
+        if(spiralCoordinates.indexInTotal == 0) {
+            this.longitude = 0; // South Pole
+            this.indexInLayer = 0;
+            return;
+        }
+        let indexInTotal = spiralCoordinates.indexInTotal-1;
+        const filedsPerTriangle = ((this.gpIndex-1)*(this.gpIndex-1)+(this.gpIndex-1))/2*5;
+        if(indexInTotal < filedsPerTriangle) {
+            const longitude = Math.floor((Math.sqrt(5)*Math.sqrt(8*indexInTotal+5)-5)/10);
+            this.longitude = longitude+1;
+            this.indexInLayer = indexInTotal-(longitude*longitude+longitude)/2*5;
+            return;
+        }
+        indexInTotal -= filedsPerTriangle;
+        const fieldsInRombus = this.gpIndex*(this.gpIndex+1)*5;
+        if(indexInTotal < fieldsInRombus) {
+            const longitude = Math.floor(indexInTotal/(this.gpIndex*5));
+            this.longitude = this.gpIndex+longitude;
+            this.indexInLayer = indexInTotal-longitude*this.gpIndex*5;
+            return;
+        }
+        indexInTotal -= fieldsInRombus;
+        if(indexInTotal < filedsPerTriangle) {
+            indexInTotal = filedsPerTriangle-indexInTotal-1;
+            const longitude = Math.floor((Math.sqrt(5)*Math.sqrt(8*indexInTotal+5)-5)/10);
+            this.longitude = this.gpIndex*3-longitude-1;
+            this.indexInLayer = (longitude+1)*5-(longitude*longitude+longitude)/2*5-1;
+            return;
+        }
+        this.longitude = this.gpIndex*3; // North Pole
+        this.indexInLayer = 0;
+    }
+
+    setEquatorCoordinates(equatorCoordinates) {
+        this.longitude = equatorCoordinates.longitude;
+        let latitude = equatorCoordinates.latitude;
+        if(longitude > this.gpIndex*2)
+            latitude -= longitude-this.gpIndex*2;
+        this.stripeLatitude = Math.floor(latitude/this.gpIndex),
+        this.indexInStripeLayer = latitude%this.gpIndex;
+    }
+
+    fieldCountInStripeLayer() {
+        return (this.longitude == 0 || this.longitude == this.gpIndex*3) ? 1 :
+               (this.longitude < this.gpIndex) ? this.longitude :
+               (this.longitude <= this.gpIndex*2) ? this.gpIndex :
+               this.gpIndex*3-this.longitude;
+    }
+
+    fieldCountInLayer() {
+        return (this.longitude == 0 || this.longitude == this.gpIndex*3) ? 1 :
+               this.fieldCountInStripeLayer()*5;
+    }
+
+    get stripeLatitude() {
+        return Math.floor(this.indexInLayer/this.fieldCountInStripeLayer());
+    }
+
+    get stripeLongitude() {
+        return Math.floor(this.longitude/this.gpIndex);
+    }
+
+    get indexInStripeLayer() {
+        return this.indexInLayer%this.fieldCountInStripeLayer();
+    }
+
+    isPole() {
+        return this.indexInStripeLayer == 0 && this.longitude%this.gpIndex == 0;
+    }
+
+    setAntipodal(layerCoordinates) {
+        this.longitude = this.gpIndex*3-layerCoordinates.longitude,
+        this.indexInLayer = (layerCoordinates.indexInLayer+(
+            (layerCoordinates.longitude < this.gpIndex) ? layerCoordinates.longitude*3 :
+            (layerCoordinates.longitude <= 2*this.gpIndex) ? this.longitude+this.gpIndex :
+            this.longitude*2
+        ))%this.fieldCountInLayer();
+    }
+}
+
+export class EquatorCoordinates {
+    constructor(gpIndex, latitude=0, longitude=0) {
+        this.gpIndex = gpIndex;
+        this.setLatitudeAndLongitude(latitude, longitude);
+    }
+
+    setLatitudeAndLongitude(latitude, longitude) {
+        this.latitude = latitude;
+        this.longitude = longitude;
+    }
+
+    setStripeCoordinates(stripeCoordinates) {
+        this.longitude = stripeCoordinates.longitude;
+        this.latitude = stripeCoordinates.indexInStripeLayer+this.gpIndex*stripeCoordinates.stripeLatitude;
+        if(this.longitude > this.gpIndex*2)
+            this.latitude += this.longitude-this.gpIndex*2;
+    }
+
+    round(latitude, longitude) {
+        const y = longitude-latitude;
+        let xInteger = Math.round(latitude),
+            yInteger = Math.round(y),
+            zInteger = Math.round(longitude);
+        const xFrac = Math.abs(xInteger-latitude),
+              yFrac = Math.abs(yInteger-y),
+              zFrac = Math.abs(longitude-zInteger);
+        if(xFrac > yFrac && xFrac > zFrac)
+            xInteger = zInteger-yInteger;
+        else if(yFrac > zFrac)
+            yInteger = zInteger-xInteger;
+        else
+            zInteger = xInteger+yInteger;
+        this.latitude = xInteger;
+        this.longitude = zInteger;
+    }
+
+    get stripeLatitude() {
+        return Math.floor(this.latitude/this.gpIndex);
+    }
+
+    get stripeLongitude() {
+        return Math.floor(this.longitude/this.gpIndex);
+    }
+
+    get indexInStripeLayer() {
+        if(this.longitude < this.gpIndex*2)
+            return this.latitude-this.stripeLatitude*this.gpIndex;
+        else if(this.longitude < this.gpIndex*3)
+            return this.latitude-(this.stripeLatitude-2)*this.gpIndex-this.longitude;
+        else
+            return 0;
+    }
+
+    get indexInLayer() {
+        if(this.longitude < this.gpIndex)
+            return this.latitude+this.stripeLatitude*(this.longitude-this.gpIndex);
+        else if(this.longitude < this.gpIndex*2)
+            return this.latitude;
+        else if(this.longitude < this.gpIndex*3)
+            return this.latitude+(this.stripeLatitude+1)*(this.gpIndex*2-this.longitude);
+        else
+            return 0;
+    }
+
+    isPole() {
+        return this.latitude%this.gpIndex == 0 && this.longitude%this.gpIndex == 0;
+    }
+}
+
+export class SpiralCoordinates {
+    constructor(gpIndex, indexInTotal=0) {
+        this.gpIndex = gpIndex;
+        this.setIndexInTotal(indexInTotal);
+    }
+
+    setIndexInTotal(indexInTotal) {
+        this.indexInTotal = indexInTotal;
+    }
+
+    setLayerCoordinates(layerCoordinates) {
+        if(layerCoordinates.longitude == 0)
+            this.indexInTotal = 0;
+        else {
+            let offset,
+                longitude = layerCoordinates.longitude-1;
+            if(longitude < this.gpIndex)
+                offset = (longitude*longitude+longitude)/2;
+            else if(longitude < this.gpIndex*2)
+                offset = (longitude+1/2)*this.gpIndex-this.gpIndex*this.gpIndex/2;
+            else {
+                longitude = this.gpIndex*3-longitude-1;
+                offset = (this.gpIndex*this.gpIndex)*2-(longitude*longitude+longitude)/2;
+            }
+            this.indexInTotal = 1+offset*5+layerCoordinates.indexInLayer;
+        }
+    }
+}
+
+/*
+triangleIndex:
+   *     *     *     *     * North pole
+  / \   / \   / \   / \   / \
+ / P \ / Q \ / R \ / S \ / T \
+*-----*-----*-----*-----*-----* Northern poles
+ \ K / \ L / \ M / \ N / \ O / \
+  \ / F \ / G \ / H \ / I \ / J \
+   *-----*-----*-----*-----*-----* Southern poles
+    \ A / \ B / \ C / \ D / \ E /
+     \ /   \ /   \ /   \ /   \ /
+      *     *     *     *     * South pole
+
+barycentric:
+     Z
+ Y       X
+
+ X       Y
+     Z
+*/
+export class TriangleCoordinates {
+    constructor(gpIndex, barycentric=[0, 0, 0], triangleIndex=0) {
+        this.gpIndex = gpIndex;
+        this.setBarycentricAndTriangleIndex(barycentric, triangleIndex);
+    }
+
+    setBarycentricAndTriangleIndex(barycentric, triangleIndex) {
+        this.barycentric = barycentric;
+        this.triangleIndex = triangleIndex;
+    }
+
+    setStripeCoordinates(stripeCoordinates) {
+        this.triangleIndex = stripeCoordinates.stripeLatitude;
+        if(stripeCoordinates.longitude > this.gpIndex*2) {
+            this.barycentric[0] = this.gpIndex*3-stripeCoordinates.longitude-stripeCoordinates.indexInStripeLayer;
+            this.barycentric[2] = stripeCoordinates.longitude-this.gpIndex*2;
+            this.triangleIndex += 15;
+        } else if(stripeCoordinates.longitude < this.gpIndex) {
+            this.barycentric[0] = stripeCoordinates.indexInStripeLayer;
+            this.barycentric[2] = this.gpIndex-stripeCoordinates.longitude;
+        } else if(stripeCoordinates.indexInStripeLayer+this.gpIndex < stripeCoordinates.longitude) {
+            this.barycentric[0] = stripeCoordinates.indexInStripeLayer;
+            this.barycentric[2] = this.gpIndex*2-stripeCoordinates.longitude;
+            this.triangleIndex += 10;
+        } else {
+            this.barycentric[0] = this.gpIndex-stripeCoordinates.indexInStripeLayer;
+            this.barycentric[2] = stripeCoordinates.longitude-this.gpIndex;
+            this.triangleIndex += 5;
+        }
+        this.barycentric[1] = this.gpIndex-(this.barycentric[0]+this.barycentric[2]);
+    }
+
+    setEquatorCoordinates(equatorCoordinates) {
+        this.triangleIndex = equatorCoordinates.stripeLatitude;
+        if(equatorCoordinates.longitude > this.gpIndex*2) {
+            this.barycentric[0] = (equatorCoordinates.longitude == this.gpIndex*3) ? 0 : this.gpIndex*3-equatorCoordinates.latitude+(this.triangleIndex-2)*this.gpIndex;
+            this.barycentric[2] = equatorCoordinates.longitude-this.gpIndex*2;
+            this.triangleIndex += 15;
+        } else if(equatorCoordinates.longitude < this.gpIndex) {
+            this.barycentric[0] = equatorCoordinates.latitude-this.triangleIndex*this.gpIndex;
+            this.barycentric[2] = this.gpIndex-equatorCoordinates.longitude;
+        } else if(equatorCoordinates.latitude-equatorCoordinates.longitude < (this.triangleIndex-1)*this.gpIndex) {
+            this.barycentric[0] = equatorCoordinates.latitude-this.triangleIndex*this.gpIndex;
+            this.barycentric[2] = this.gpIndex*2-equatorCoordinates.longitude;
+            this.triangleIndex += 10;
+        } else {
+            this.barycentric[0] = (this.triangleIndex+1)*this.gpIndex-equatorCoordinates.latitude;
+            this.barycentric[2] = equatorCoordinates.longitude-this.gpIndex;
+            this.triangleIndex += 5;
+        }
+        this.barycentric[1] = this.gpIndex-(this.barycentric[0]+this.barycentric[2]);
+    }
+
+    get triangleLatitude() {
+        return this.triangleIndex%5;
+    }
+
+    get triangleLongitude() {
+        return Math.floor(this.triangleIndex/5);
+    }
+
+    distanceToClosestPole() {
+        return this.gpIndex-Math.max(Math.max(this.barycentric[0], this.barycentric[1]), this.barycentric[2]);
+    }
+
+    poleIndices() {
+        switch(this.triangleLongitude) {
+            case 3:
+                return [6+this.triangleLatitude, 6+(this.triangleLatitude+1)%5, 11];
+            case 2:
+                return [6+(this.triangleLatitude+1)%5, 6+this.triangleLatitude, 1+this.triangleLatitude];
+            case 1:
+                return [1+this.triangleLatitude, 1+(this.triangleLatitude+1)%5, 6+(this.triangleLatitude+1)%5];
+            case 0:
+                return [1+(this.triangleLatitude+1)%5, 1+this.triangleLatitude, 0];
+        }
+    }
+
+    closestPole() {
+        const maxCoord = Math.max(Math.max(this.barycentric[0], this.barycentric[1]), this.barycentric[2]),
+              poleIndices = this.poleIndices();
+        for(let i = 0; i < 3; ++i)
+            if(this.barycentric[i] == maxCoord)
+                return poleIndices[i];
+    }
+}
+
 export class IcosahedralClass1GoldbergPolyhedron {
     constructor(abandon, fieldsHaveCenterVertex, gpIndex, edgeLength3D, edgeLength2D, yRotation=0.0) {
         this.abandon = abandon; // One of ['curvature', 'size', 'shape']
@@ -76,201 +373,49 @@ export class IcosahedralClass1GoldbergPolyhedron {
         this.sphereRadius = this.icosahedronEdgeLength*icosahedronRadiusByEdgeLength;
     }
 
-    getBorderVertexCountPerEdgeAtLayer(layerIndex) {
-        return (layerIndex < this.gpIndex) ? layerIndex*2+1 :
-               (layerIndex < this.gpIndex*2) ? this.gpIndex*2 :
-               (this.gpIndex*3-layerIndex)*2-1;
+    getBorderVertexCountPerEdgeAtLayer(longitude) {
+        return (longitude < this.gpIndex) ? longitude*2+1 :
+               (longitude < this.gpIndex*2) ? this.gpIndex*2 :
+               (this.gpIndex*3-longitude)*2-1;
     }
 
-    getFieldCountInStripeLayer(layerIndex) {
-        return (layerIndex < this.gpIndex) ? layerIndex :
-               (layerIndex <= this.gpIndex*2) ? this.gpIndex :
-               this.gpIndex*3-layerIndex;
-    }
-
-    getFieldCountInLayer(layerIndex) {
-        return (layerIndex == 0 || layerIndex == this.gpIndex*3) ? 1 :
-               this.getFieldCountInStripeLayer(layerIndex)*5;
-    }
-
-    wrapIndexInLayer(indexInLayer, layerIndex) {
-        return indexInLayer%this.getFieldCountInLayer(layerIndex);
-    }
-
-    barycentricCubeCoordinates(indexInStripeLayer, stripeIndex, layerIndex) {
-        const result =
-            (layerIndex > 2*this.gpIndex) ? [3*this.gpIndex-layerIndex-indexInStripeLayer, 0, layerIndex-2*this.gpIndex, 15+stripeIndex] :
-            (layerIndex < this.gpIndex) ? [indexInStripeLayer, 0, this.gpIndex-layerIndex, stripeIndex] :
-            (indexInStripeLayer+this.gpIndex < layerIndex) ? [indexInStripeLayer, 0, 2*this.gpIndex-layerIndex, 10+stripeIndex] :
-            [this.gpIndex-indexInStripeLayer, 0, layerIndex-this.gpIndex, 5+stripeIndex];
-        result[1] = this.gpIndex-(result[0]+result[2]);
-        return result;
-    }
-
-    distToClosestPole(barycentricCubeCoordinates) {
-        return this.gpIndex-Math.max(Math.max(barycentricCubeCoordinates[0], barycentricCubeCoordinates[1]), barycentricCubeCoordinates[2]);
-    }
-
-    closestPole(barycentricCubeCoordinates) {
-        const maxCoord = Math.max(Math.max(barycentricCubeCoordinates[0], barycentricCubeCoordinates[1]), barycentricCubeCoordinates[2]),
-              stripeIndex = barycentricCubeCoordinates[3]%5;
-        switch(Math.floor(barycentricCubeCoordinates[3]/5)) {
-            case 3:
-                if(barycentricCubeCoordinates[0] == maxCoord)
-                    return 6+stripeIndex;
-                else if(barycentricCubeCoordinates[1] == maxCoord)
-                    return 6+(stripeIndex+1)%5;
-                else // if(barycentricCubeCoordinates[2] == maxCoord)
-                    return 11;
-            case 2:
-                if(barycentricCubeCoordinates[0] == maxCoord)
-                    return 6+(stripeIndex+1)%5;
-                else if(barycentricCubeCoordinates[1] == maxCoord)
-                    return 6+stripeIndex;
-                else // if(barycentricCubeCoordinates[2] == maxCoord)
-                    return 1+stripeIndex;
-            case 1:
-                if(barycentricCubeCoordinates[0] == maxCoord)
-                    return 1+stripeIndex;
-                else if(barycentricCubeCoordinates[1] == maxCoord)
-                    return 1+(stripeIndex+1)%5;
-                else // if(barycentricCubeCoordinates[2] == maxCoord)
-                    return 6+(stripeIndex+1)%5;
-            case 0:
-                if(barycentricCubeCoordinates[0] == maxCoord)
-                    return 1+(stripeIndex+1)%5;
-                else if(barycentricCubeCoordinates[1] == maxCoord)
-                    return 1+stripeIndex;
-                else // if(barycentricCubeCoordinates[2] == maxCoord)
-                    return 0;
-        }
-    }
-
-    indexInLayerToIndexInStripeLayerAndStripeIndex(indexInLayer, layerIndex) {
-        if(layerIndex == 0 || layerIndex == this.gpIndex*3)
-            return [0, 0];
-        const fieldCountInStripeLayer = this.getFieldCountInStripeLayer(layerIndex),
-              indexInStripeLayer = indexInLayer%fieldCountInStripeLayer,
-              stripeIndex = Math.floor(indexInLayer/fieldCountInStripeLayer);
-        return [indexInStripeLayer, stripeIndex];
-    }
-
-    indexInStripeLayerAndStripeIndexToIndexInLayer(indexInStripeLayer, stripeIndex, layerIndex) {
-        return indexInStripeLayer+stripeIndex*this.getFieldCountInStripeLayer(layerIndex);
-    }
-
-    indexAtEquatorToIndexInStripeLayerAndStripeIndex(indexAtEquator, layerIndex) {
-        if(layerIndex > this.gpIndex*2)
-            indexAtEquator -= layerIndex-this.gpIndex*2;
-        const stripeIndex = Math.floor(indexAtEquator/this.gpIndex),
-              indexInStripeLayer = indexAtEquator%this.gpIndex;
-        return [indexInStripeLayer, stripeIndex];
-    }
-
-    indexInStripeLayerAndStripeIndexToIndexAtEquator(indexInStripeLayer, stripeIndex, layerIndex) {
-        let indexAtEquator = indexInStripeLayer+this.gpIndex*stripeIndex;
-        if(layerIndex > this.gpIndex*2)
-            indexAtEquator += layerIndex-this.gpIndex*2;
-        return indexAtEquator;
-    }
-
-    roundIndexAtEquatorAndLayerIndex(indexAtEquator, layerIndex) {
-        const y = layerIndex-indexAtEquator;
-        let xInteger = Math.round(indexAtEquator),
-            yInteger = Math.round(y),
-            zInteger = Math.round(layerIndex);
-        const xFrac = Math.abs(xInteger-indexAtEquator),
-              yFrac = Math.abs(yInteger-y),
-              zFrac = Math.abs(layerIndex-zInteger);
-        if(xFrac > yFrac && xFrac > zFrac)
-            xInteger = zInteger-yInteger;
-        else if(yFrac > zFrac)
-            yInteger = zInteger-xInteger;
-        else
-            zInteger = xInteger+yInteger;
-        return [xInteger, zInteger];
-    }
-
-    getAntipodalIndexInLayerAndLayerIndex(indexInLayer, layerIndex) {
-        const newLayerIndex = this.gpIndex*3-layerIndex;
-        indexInLayer += (layerIndex < this.gpIndex) ? layerIndex*3 :
-                       (layerIndex <= 2*this.gpIndex) ? newLayerIndex+this.gpIndex :
-                       newLayerIndex*2;
-        return [this.wrapIndexInLayer(indexInLayer, layerIndex), newLayerIndex];
-    }
-
-    indexInLayerToIndexInTotal(indexInLayer, layerIndex) {
-        if(layerIndex-- == 0)
-            return 0;
-        let offset;
-        if(layerIndex < this.gpIndex)
-            offset = (layerIndex*layerIndex+layerIndex)/2;
-        else if(layerIndex < this.gpIndex*2)
-            offset = (layerIndex+1/2)*this.gpIndex-this.gpIndex*this.gpIndex/2;
-        else {
-            layerIndex = this.gpIndex*3-layerIndex-1;
-            offset = (this.gpIndex*this.gpIndex)*2-(layerIndex*layerIndex+layerIndex)/2;
-        }
-        return 1+offset*5+indexInLayer;
-    }
-
-    indexInTotalToIndexInLayerAndLayerIndex(indexInTotal) {
-        if(indexInTotal-- == 0)
-            return [0, 0]; // South Pole
-        const filedsPerTriangle = ((this.gpIndex-1)*(this.gpIndex-1)+(this.gpIndex-1))/2*5;
-        if(indexInTotal < filedsPerTriangle) {
-            const layerIndex = Math.floor((Math.sqrt(5)*Math.sqrt(8*indexInTotal+5)-5)/10);
-            indexInTotal -= (layerIndex*layerIndex+layerIndex)/2*5;
-            return [indexInTotal, layerIndex+1];
-        }
-        indexInTotal -= filedsPerTriangle;
-        const fieldsInRombus = this.gpIndex*(this.gpIndex+1)*5;
-        if(indexInTotal < fieldsInRombus) {
-            const layerIndex = Math.floor(indexInTotal/(this.gpIndex*5));
-            indexInTotal -= layerIndex*this.gpIndex*5;
-            return [indexInTotal, this.gpIndex+layerIndex];
-        }
-        indexInTotal -= fieldsInRombus;
-        if(indexInTotal < filedsPerTriangle) {
-            indexInTotal = filedsPerTriangle-indexInTotal-1;
-            const layerIndex = Math.floor((Math.sqrt(5)*Math.sqrt(8*indexInTotal+5)-5)/10);
-            indexInTotal -= (layerIndex*layerIndex+layerIndex)/2*5;
-            return [(layerIndex+1)*5-indexInTotal-1, this.gpIndex*3-layerIndex-1];
-        }
-        return [0, this.gpIndex*3]; // North Pole
-    }
-
-    getFieldPosition3D(out, indexInLayer, layerIndex) {
-        const offset = this.indexInLayerToIndexInTotal(indexInLayer, layerIndex)*3;
+    getFieldPosition3D(position, spiralCoordinates) {
+        const offset = spiralCoordinates.indexInTotal*3;
         for(let i = 0; i < 3; ++i)
-            out[i] = this.positions[offset+i];
+            position[i] = this.positions[offset+i];
     }
 
-    getFieldPosition2D(out, indexInStripeLayer, stripeIndex, layerIndex) {
-        if(layerIndex == 0) {
-            stripeIndex = 0;
-            indexInStripeLayer = -1;
-            ++layerIndex;
-        } else if(layerIndex == this.gpIndex*3) {
-            stripeIndex = 4;
-            indexInStripeLayer = 1;
-            --layerIndex;
-        } else if(layerIndex == this.gpIndex*2 && indexInStripeLayer == 0 && stripeIndex == 0)
-            stripeIndex += 5;
-        const indexAtEquator = this.indexInStripeLayerAndStripeIndexToIndexAtEquator(indexInStripeLayer, stripeIndex, layerIndex);
-        out[0] = this.fieldWidth2D*(0.5*(this.gpIndex*2-layerIndex)+indexAtEquator);
-        out[1] = this.fieldHeight2D*(0.75*(this.gpIndex*3-layerIndex-1)+0.5);
+    getFieldPosition2D(position, equatorCoordinates) {
+        let latitude = equatorCoordinates.latitude,
+            longitude = equatorCoordinates.longitude;
+        if(equatorCoordinates.longitude == 0) { // Remap south pole
+            latitude = -1;
+            ++longitude;
+        } else if(equatorCoordinates.longitude == this.gpIndex*3) { // Remap north pole
+            latitude = this.gpIndex*5;
+            --longitude;
+        } else if(equatorCoordinates.longitude == this.gpIndex*2 && equatorCoordinates.latitude == 0) // Remap first northern pole
+            latitude = this.gpIndex*5;
+        position[0] = this.fieldWidth2D*(0.5*(this.gpIndex*2-longitude)+latitude);
+        position[1] = this.fieldHeight2D*(0.75*(this.gpIndex*3-longitude-1)+0.5);
     }
 
-    position2DToIndexAtEquator(position) {
-        let layerIndex = this.gpIndex*3-1-(position[1]/this.fieldHeight2D-0.5)/0.75,
-            indexAtEquator = position[0]/this.fieldWidth2D-0.5*(this.gpIndex*2-layerIndex);
-        [indexAtEquator, layerIndex] = this.roundIndexAtEquatorAndLayerIndex(indexAtEquator, layerIndex);
-        if(indexAtEquator == this.gpIndex*5)
-            return (layerIndex == this.gpIndex*3-1) ? [this.gpIndex, this.gpIndex*3] : [0, this.gpIndex*2];
-        else if(indexAtEquator == -1)
-            return [0, 0];
-        return [indexAtEquator, layerIndex];
+    equatorCoordinatesFromPosition2D(equatorCoordinates, position) {
+        let longitude = this.gpIndex*3-1-(position[1]/this.fieldHeight2D-0.5)/0.75,
+            latitude = position[0]/this.fieldWidth2D-0.5*(this.gpIndex*2-longitude);
+        equatorCoordinates.round(latitude, longitude);
+        if(equatorCoordinates.latitude == -1) { // Remap south pole
+            equatorCoordinates.latitude = 0;
+            equatorCoordinates.longitude = 0;
+        } else if(equatorCoordinates.latitude == this.gpIndex*5) {
+            if(equatorCoordinates.longitude == this.gpIndex*3-1) { // Remap north pole
+                equatorCoordinates.latitude = this.gpIndex;
+                equatorCoordinates.longitude = this.gpIndex*3;
+            } else { // Remap first northern pole
+                equatorCoordinates.latitude = 0;
+                equatorCoordinates.longitude = this.gpIndex*2;
+            }
+        }
     }
 
     getBorderTexcoord(out, fieldPosition2D, direction, hemisphere) {
@@ -315,9 +460,12 @@ export class IcosahedralClass1GoldbergPolyhedron {
         this.vertexCount = this.fieldCount+this.borderVertexCount;
         this.positions = new Float32Array(this.vertexCount*3);
         this.normals = new Float32Array(this.vertexCount*3);
-        // Initialize generator functions
         const normal = vec3.create(),
-              position = vec3.create();
+              position = vec3.create(),
+              layerCoordinates = new LayerCoordinates(this.gpIndex),
+              spiralCoordinates = new SpiralCoordinates(this.gpIndex),
+              triangleCoordinates = new TriangleCoordinates(this.gpIndex);
+        // Initialize generator functions
         const generateVertex = (offset) => {
             offset *= 3;
             vec3.normalize(normal, position);
@@ -331,60 +479,22 @@ export class IcosahedralClass1GoldbergPolyhedron {
             this.positions[offset+2] = position[2];
         };
         /* Interpolates the triangle (A, B, C) either linearly or spherically
-         * s Goes from 0=B to 1=C
-         * t Goes from 0=A to 1=BC
+         * s Goes from 0=A to 1=B
+         * t Goes from 0=C to 1=AB
         */
-        const vecAB = vec3.create(),
-              vecAC = vec3.create();
+        const vecCA = vec3.create(),
+              vecCB = vec3.create();
         const interpolateTriangle = (this.abandon == 'shape')
             ? (a, b, c, s, t) => {
-            vec3Slerp(vecAB, a, b, t);
-            vec3Slerp(vecAC, a, c, t);
-            vec3Slerp(position, vecAB, vecAC, s);
+            vec3Slerp(vecCA, c, a, t);
+            vec3Slerp(vecCB, c, b, t);
+            vec3Slerp(position, vecCA, vecCB, s);
         }
             : (a, b, c, s, t) => {
-            vec3.lerp(position, b, c, s);
-            vec3.lerp(position, a, position, t);
+            vec3.lerp(position, a, b, s);
+            vec3.lerp(position, c, position, t);
         };
-        /* Fills a triangle (A, B, C)
-         * stripeIndexAtA and layerIndexAtA are defined at point A
-         * fillEdge fills the fields between B and C
-         * mode switches the direction (up or down) like this:
-
-         if mode == 0:
-         +--------------> X
-         |
-         |   B ------- C
-         |    \       /
-         |     \     /
-         |      \   /
-         |       \ /
-         |        A
-         |
-         v Y
-
-         if mode != 0:
-         ^ Y
-         |        A
-         |       / \
-         |      /   \
-         |     /     \
-         |    /       \
-         |   B ------- C
-         |
-         +--------------> X
-        */
-        const fillTriangle = (stripeIndexAtA, layerIndexAtA, fillEdge, mode, a, b, c) => {
-            for(let y = 1; y < this.gpIndex+fillEdge; ++y) {
-                const layerIndex = this.gpIndex*layerIndexAtA+(mode > 0 ? -y : y),
-                      indexInLayer = stripeIndexAtA*this.getFieldCountInStripeLayer(layerIndex)+((mode > 1) ? -y : 0);
-                for(let x = 0; x < y; ++x) {
-                    interpolateTriangle(a, b, c, x/y, y/this.gpIndex);
-                    generateVertex(this.indexInLayerToIndexInTotal(indexInLayer+x, layerIndex));
-                }
-            }
-        };
-        /* generateBorderVertex finds the border vertex O between the filed centers (A, B, C):
+        /* generateBorderVertex finds the border vertex O between the field centers (A, B, C):
                  \
              A    )-----
                  /
@@ -402,55 +512,37 @@ export class IcosahedralClass1GoldbergPolyhedron {
             generateVertex(borderVertexIndex++);
         };
         // Generate 12 icosahedron poles
-        const southPole = vec3.fromValues(0, -this.sphereRadius, 0),
-              northPole = vec3.fromValues(0, this.sphereRadius, 0);
-        vec3.copy(position, southPole);
-        generateVertex(this.indexInLayerToIndexInTotal(0, 0));
-        vec3.copy(position, northPole);
-        generateVertex(this.indexInLayerToIndexInTotal(0, this.gpIndex*3));
-        const southernPoles = [], northernPoles = [],
-              pentagonY = 1.0/Math.sqrt(5.0)*this.sphereRadius,
+        const poles = [];
+        vec3.set(position, 0, -this.sphereRadius, 0);
+        poles[0] = vec3.clone(position);
+        generateVertex(0);
+        vec3.set(position, 0, this.sphereRadius, 0);
+        poles[11] = vec3.clone(position);
+        generateVertex(this.fieldCount-1);
+        const pentagonY = -1.0/Math.sqrt(5.0)*this.sphereRadius,
               pentagonRadius = 2.0/Math.sqrt(5.0)*this.sphereRadius;
         for(let i = 0; i < 5; ++i) {
             const angle = this.yRotation+i*Math.PI*2.0/5.0;
             position[0] = Math.sin(angle)*pentagonRadius;
             position[1] = pentagonY;
             position[2] = Math.cos(angle)*pentagonRadius;
-            northernPoles.push(vec3.clone(position));
+            poles[1+i] = vec3.clone(position);
             vec3.scale(position, position, -1.0);
-            southernPoles.push(vec3.clone(position));
+            poles[6+(i+3)%5] = vec3.clone(position);
         }
-        /* Generate center vertices (interpolation)
-           Each iteration generates a stripe of 4 triangles (A, B, C, D):
-              * northPole
-             / \
-            / D \
-           *-----* northernPoles
-            \ C / \
-             \ / B \
-              *-----* southernPoles
-               \ A /
-                \ /
-                 *  southPole
-
-           All 5 iterations result in 20 triangles (A - T):
-              *     *     *     *     * northPole
-             / \   / \   / \   / \   / \
-            / D \ / H \ / L \ / P \ / T \
-           *-----*-----*-----*-----*-----* northernPoles
-            \ C / \ G / \ K / \ O / \ S / \
-             \ / B \ / F \ / J \ / N \ / R \
-              *-----*-----*-----*-----*-----* southernPoles
-               \ A / \ E / \ I / \ M / \ Q /
-                \ /   \ /   \ /   \ /   \ /
-                 *     *     *     *     * southPole
-        */
-        for(let stripeIndex = 0; stripeIndex < 5; ++stripeIndex) {
-            const i0 = stripeIndex, i1 = (stripeIndex+1)%5, i2 = (stripeIndex+2)%5, i3 = (stripeIndex+3)%5;
-            fillTriangle(stripeIndex,   0, 0, 0, southPole, southernPoles[i0], southernPoles[i1]); // Triangle A
-            fillTriangle(stripeIndex+1, 2, 1, 2, northernPoles[i3], southernPoles[i0], southernPoles[i1]); // Triangle B
-            fillTriangle(stripeIndex,   1, 1, 0, southernPoles[i0], northernPoles[i2], northernPoles[i3]); // Triangle C
-            fillTriangle(stripeIndex,   3, 0, 1, northPole, northernPoles[i2], northernPoles[i3]); // Triangle D
+        // Generate center vertices by barycentric interpolation
+        for(let longitude = 1; longitude < this.gpIndex*3; ++longitude) {
+            layerCoordinates.longitude = longitude;
+            for(let indexInLayer = 0; indexInLayer < layerCoordinates.fieldCountInLayer(); ++indexInLayer) {
+                layerCoordinates.setIndexInLayerAndLongitude(indexInLayer, longitude);
+                triangleCoordinates.setStripeCoordinates(layerCoordinates);
+                const poleIndices = triangleCoordinates.poleIndices(),
+                      s = (triangleCoordinates.barycentric[1])/(this.gpIndex-triangleCoordinates.barycentric[2]),
+                      t = (this.gpIndex-triangleCoordinates.barycentric[2])/this.gpIndex;
+                interpolateTriangle(poles[poleIndices[0]], poles[poleIndices[1]], poles[poleIndices[2]], s, t);
+                spiralCoordinates.setLayerCoordinates(layerCoordinates);
+                generateVertex(spiralCoordinates.indexInTotal);
+            }
         }
         /* Generate border vertices (tesselation)
            Each layer is generated using a tirangle strip:
@@ -466,23 +558,33 @@ export class IcosahedralClass1GoldbergPolyhedron {
               upperFiledVertex = vec3.create(),
               prevLowerFiledVertex = vec3.create(),
               prevUpperFiledVertex = vec3.create();
-        for(let layerIndex = 0; layerIndex <= this.gpIndex*3; ++layerIndex) {
-            const borderVertexCountAtLayer = this.getBorderVertexCountPerEdgeAtLayer(layerIndex),
-                  hemisphere = (layerIndex < this.gpIndex*2) ? 0 : 1;
+        for(let longitude = 0; longitude <= this.gpIndex*3; ++longitude) {
+            const borderVertexCountAtLayer = this.getBorderVertexCountPerEdgeAtLayer(longitude),
+                  hemisphere = (longitude < this.gpIndex*2) ? 0 : 1;
             let lowerIndex = 0, upperIndex = 0;
-            this.getFieldPosition3D(lowerFiledVertex, lowerIndex, layerIndex);
-            this.getFieldPosition3D(upperFiledVertex, upperIndex, layerIndex+1);
-            for(let stripeIndex = 0; stripeIndex < 5; ++stripeIndex)
+            layerCoordinates.setIndexInLayerAndLongitude(lowerIndex, longitude);
+            const fieldCountInLowerLayer = layerCoordinates.fieldCountInLayer();
+            spiralCoordinates.setLayerCoordinates(layerCoordinates);
+            this.getFieldPosition3D(lowerFiledVertex, spiralCoordinates);
+            layerCoordinates.setIndexInLayerAndLongitude(upperIndex, longitude+1);
+            const fieldCountInUpperLayer = layerCoordinates.fieldCountInLayer();
+            spiralCoordinates.setLayerCoordinates(layerCoordinates);
+            this.getFieldPosition3D(upperFiledVertex, spiralCoordinates);
+            for(let stripeLatitude = 0; stripeLatitude < 5; ++stripeLatitude)
                 for(let indexInStripeLayer = 0; indexInStripeLayer < borderVertexCountAtLayer; ++indexInStripeLayer) {
                     if(indexInStripeLayer%2 == hemisphere) { // Downward Triangle
                         vec3.copy(prevUpperFiledVertex, upperFiledVertex);
-                        upperIndex = this.wrapIndexInLayer(upperIndex+1, layerIndex+1);
-                        this.getFieldPosition3D(upperFiledVertex, upperIndex, layerIndex+1);
+                        upperIndex = (upperIndex+1)%fieldCountInUpperLayer;
+                        layerCoordinates.setIndexInLayerAndLongitude(upperIndex, longitude+1);
+                        spiralCoordinates.setLayerCoordinates(layerCoordinates);
+                        this.getFieldPosition3D(upperFiledVertex, spiralCoordinates);
                         generateBorderVertex(lowerFiledVertex, upperFiledVertex, prevUpperFiledVertex);
                     } else { // Upward Triangle
                         vec3.copy(prevLowerFiledVertex, lowerFiledVertex);
-                        lowerIndex = this.wrapIndexInLayer(lowerIndex+1, layerIndex);
-                        this.getFieldPosition3D(lowerFiledVertex, lowerIndex, layerIndex);
+                        lowerIndex = (lowerIndex+1)%fieldCountInLowerLayer;
+                        layerCoordinates.setIndexInLayerAndLongitude(lowerIndex, longitude);
+                        spiralCoordinates.setLayerCoordinates(layerCoordinates);
+                        this.getFieldPosition3D(lowerFiledVertex, spiralCoordinates);
                         generateBorderVertex(lowerFiledVertex, upperFiledVertex, prevLowerFiledVertex);
                     }
                 }
@@ -508,7 +610,9 @@ export class IcosahedralClass1GoldbergPolyhedron {
         const primitiveRestartIndex = 65535,
               glElementBuffer = new Uint16Array(this.fieldCount*this.elementsPerField),
               glVertexBuffer = new Float32Array((pentagonVertexOffset+12*5)*8),
-              fieldPosition2D = vec2.create();
+              fieldPosition2D = vec2.create(),
+              layerCoordinates = new LayerCoordinates(this.gpIndex),
+              equatorCoordinates = new EquatorCoordinates(this.gpIndex);
         // Initialize generator functions
         const generateVertex = (vertexIndex, direction) => {
             let outVertexOffset;
@@ -531,7 +635,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
             glVertexBuffer[outVertexOffset+5] = this.normals[vertexIndex+2];
             this.getBorderTexcoord(glVertexBuffer.subarray(outVertexOffset+6, outVertexOffset+8), fieldPosition2D, direction, indexInTotal > this.fieldCount/2);
         };
-        const generatePoleVertices = (layerIndex, stripeIndex, elementOffsetAtLayer, borderVertexCountAtLayer0) => {
+        const generatePoleVertices = (longitude, stripeLatitude, elementOffset, borderVertexCountAtLayer0) => {
             let outElementOffset = indexInTotal*this.elementsPerField;
             if(this.fieldsHaveCenterVertex)
                 glElementBuffer[outElementOffset+0] = indexInTotal;
@@ -545,95 +649,100 @@ export class IcosahedralClass1GoldbergPolyhedron {
             else
                 --outElementOffset;
             glElementBuffer[outElementOffset+8] = primitiveRestartIndex;
-            if(layerIndex == 0) // South Pole
+            if(longitude == 0) // South Pole
                 for(let i = 0; i < 5; ++i)
                     generateVertex(borderVertexIndex+4-i, i);
-            else if(layerIndex == this.gpIndex*3) // North Pole
+            else if(longitude == this.gpIndex*3) // North Pole
                 for(let i = 0; i < 5; ++i)
                     generateVertex(borderVertexIndex-5+i, i);
-            else if(stripeIndex == 0) { // Western Poles
-                if(layerIndex == this.gpIndex) { // Southern Pole
+            else if(stripeLatitude == 0) { // Western Poles
+                if(longitude == this.gpIndex) { // Southern Pole
                     generateVertex(borderVertexIndex, 0);
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer-5, 1);
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer-6, 2);
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer+borderVertexCountAtLayer0-7, 3);
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer-7, 4);
+                    generateVertex(borderVertexIndex+elementOffset-5, 1);
+                    generateVertex(borderVertexIndex+elementOffset-6, 2);
+                    generateVertex(borderVertexIndex+elementOffset+borderVertexCountAtLayer0-7, 3);
+                    generateVertex(borderVertexIndex+elementOffset-7, 4);
                 } else { // Northern Pole
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer-1, 0);
+                    generateVertex(borderVertexIndex+elementOffset-1, 0);
                     generateVertex(borderVertexIndex, 1);
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer, 2);
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer+borderVertexCountAtLayer0-1, 3);
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer-2, 4);
+                    generateVertex(borderVertexIndex+elementOffset, 2);
+                    generateVertex(borderVertexIndex+elementOffset+borderVertexCountAtLayer0-1, 3);
+                    generateVertex(borderVertexIndex+elementOffset-2, 4);
                     fieldPosition2D[0] -= this.fieldWidth2D*this.gpIndex*5;
                 }
             } else { // Other Poles
                 generateVertex(borderVertexIndex, 0);
-                if(layerIndex == this.gpIndex) { // Southern Poles
-                    elementOffsetAtLayer += stripeIndex;
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer-5, 1);
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer-6, 2);
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer-7, 3);
+                if(longitude == this.gpIndex) { // Southern Poles
+                    elementOffset += stripeLatitude;
+                    generateVertex(borderVertexIndex+elementOffset-5, 1);
+                    generateVertex(borderVertexIndex+elementOffset-6, 2);
+                    generateVertex(borderVertexIndex+elementOffset-7, 3);
                 } else { // Northern Poles
-                    elementOffsetAtLayer -= stripeIndex;
+                    elementOffset -= stripeLatitude;
                     generateVertex(borderVertexIndex+1, 1);
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer+1, 2);
-                    generateVertex(borderVertexIndex+elementOffsetAtLayer, 3);
+                    generateVertex(borderVertexIndex+elementOffset+1, 2);
+                    generateVertex(borderVertexIndex+elementOffset, 3);
                 }
                 generateVertex(borderVertexIndex-1, 4);
             }
             generateVertex(indexInTotal++, 'Close');
         };
         // Generate south pole
-        this.getFieldPosition2D(fieldPosition2D, 0, 0, 0);
+        this.getFieldPosition2D(fieldPosition2D, equatorCoordinates);
         generatePoleVertices(0);
         // Copy and interleave vertices
-        for(let layerIndex = 1; layerIndex < this.gpIndex*3; ++layerIndex) {
-            const fieldCountInStripeLayer = this.getFieldCountInStripeLayer(layerIndex),
-                  borderVertexCountAtLayer0 = this.getBorderVertexCountPerEdgeAtLayer(layerIndex)*5,
-                  borderVertexCountAtLayer1 = this.getBorderVertexCountPerEdgeAtLayer(layerIndex-1),
-                  borderVertexCountAtLayer2 = this.getBorderVertexCountPerEdgeAtLayer(layerIndex-2);
+        for(let longitude = 1; longitude < this.gpIndex*3; ++longitude) {
+            layerCoordinates.longitude = longitude;
+            const borderVertexCountAtLayer0 = this.getBorderVertexCountPerEdgeAtLayer(longitude)*5,
+                  borderVertexCountAtLayer1 = this.getBorderVertexCountPerEdgeAtLayer(longitude-1),
+                  borderVertexCountAtLayer2 = this.getBorderVertexCountPerEdgeAtLayer(longitude-2);
             let elementCountAtLayer;
-            if(layerIndex < this.gpIndex)
-                elementCountAtLayer = layerIndex*10+5;
-            else if(layerIndex <= this.gpIndex*2) {
+            if(longitude < this.gpIndex)
+                elementCountAtLayer = longitude*10+5;
+            else if(longitude <= this.gpIndex*2) {
                 elementCountAtLayer = this.gpIndex*10;
-                if(layerIndex > this.gpIndex && layerIndex < this.gpIndex*2)
-                    elementCountAtLayer += (layerIndex+1 == this.gpIndex*2) ? 1 : 2;
+                if(longitude > this.gpIndex && longitude < this.gpIndex*2)
+                    elementCountAtLayer += (longitude+1 == this.gpIndex*2) ? 1 : 2;
             } else
-                elementCountAtLayer = (this.gpIndex*3-layerIndex)*10+5;
-            for(let stripeIndex = 0; stripeIndex < 5; ++stripeIndex) {
-                let elementOffsetAtLayer = elementCountAtLayer;
-                if(layerIndex < this.gpIndex-1)
-                    elementOffsetAtLayer += stripeIndex*2;
-                else if(layerIndex == this.gpIndex-1)
-                    elementOffsetAtLayer += stripeIndex-1;
-                else if(layerIndex == this.gpIndex)
-                    ++elementOffsetAtLayer;
-                else if(layerIndex == this.gpIndex*2+1)
-                    elementOffsetAtLayer += (4-stripeIndex);
-                else if(layerIndex > this.gpIndex*2+1)
-                    elementOffsetAtLayer += (4-stripeIndex)*2;
+                elementCountAtLayer = (this.gpIndex*3-longitude)*10+5;
+            for(let stripeLatitude = 0; stripeLatitude < 5; ++stripeLatitude) {
+                let elementOffset = elementCountAtLayer;
+                if(longitude < this.gpIndex-1)
+                    elementOffset += stripeLatitude*2;
+                else if(longitude == this.gpIndex-1)
+                    elementOffset += stripeLatitude-1;
+                else if(longitude == this.gpIndex)
+                    ++elementOffset;
+                else if(longitude == this.gpIndex*2+1)
+                    elementOffset += (4-stripeLatitude);
+                else if(longitude > this.gpIndex*2+1)
+                    elementOffset += (4-stripeLatitude)*2;
+                const fieldCountInStripeLayer = layerCoordinates.fieldCountInStripeLayer();
                 for(let indexInStripeLayer = 0; indexInStripeLayer < fieldCountInStripeLayer; ++indexInStripeLayer) {
-                    const indexInLayer = fieldCountInStripeLayer*stripeIndex+indexInStripeLayer,
-                          isNotPole = (indexInStripeLayer > 0 || layerIndex%this.gpIndex > 0);
-                    this.getFieldPosition2D(fieldPosition2D, indexInStripeLayer, stripeIndex, layerIndex);
-                    if(indexInStripeLayer == 0 && (stripeIndex == 0 || layerIndex < this.gpIndex || layerIndex > this.gpIndex*2)) { // Seam edge
+                    const indexInLayer = fieldCountInStripeLayer*stripeLatitude+indexInStripeLayer;
+                    layerCoordinates.setIndexInLayerAndLongitude(indexInLayer, longitude);
+                    equatorCoordinates.setStripeCoordinates(layerCoordinates);
+                    this.getFieldPosition2D(fieldPosition2D, equatorCoordinates);
+                    const isNotPole = !equatorCoordinates.isPole(),
+                          isLeadSeam = equatorCoordinates.latitude%this.gpIndex == 0 && (equatorCoordinates.latitude == 0 || layerCoordinates.longitude <= this.gpIndex),
+                          isTailSeam = equatorCoordinates.latitude%this.gpIndex == this.gpIndex-1 && (equatorCoordinates.latitude > this.gpIndex*4 || equatorCoordinates.longitude > this.gpIndex*2);
+                    if(isLeadSeam || (equatorCoordinates.longitude > this.gpIndex*2 && equatorCoordinates.latitude%this.gpIndex == equatorCoordinates.longitude%this.gpIndex)) { // Seam edge
                         fieldPosition2D[0] -= this.fieldWidth2D;
-                        if(layerIndex > this.gpIndex*2+1)
-                            generateVertex((stripeIndex == 0)
+                        if(equatorCoordinates.longitude > this.gpIndex*2+1)
+                            generateVertex((equatorCoordinates.latitude < this.gpIndex)
                                 ? borderVertexIndex-2
-                                : borderVertexIndex-borderVertexCountAtLayer2*(5-stripeIndex)-borderVertexCountAtLayer1*stripeIndex-2
+                                : borderVertexIndex-borderVertexCountAtLayer2*(5-stripeLatitude)-borderVertexCountAtLayer1*stripeLatitude-2
                             , 'South');
                         if(isNotPole) {
                             let vertexIndex;
-                            if(layerIndex > this.gpIndex*2)
-                                vertexIndex = (stripeIndex == 0) ? borderVertexIndex+borderVertexCountAtLayer1*5-1 : borderVertexIndex-1;
-                            else if(layerIndex > this.gpIndex)
+                            if(equatorCoordinates.longitude > this.gpIndex*2)
+                                vertexIndex = (equatorCoordinates.latitude < this.gpIndex) ? borderVertexIndex+borderVertexCountAtLayer1*5-1 : borderVertexIndex-1;
+                            else if(equatorCoordinates.longitude > this.gpIndex)
                                 vertexIndex = borderVertexIndex+borderVertexCountAtLayer1*5-2;
-                            else if(stripeIndex == 0)
+                            else if(equatorCoordinates.latitude < this.gpIndex)
                                 vertexIndex = borderVertexIndex+borderVertexCountAtLayer1*5+borderVertexCountAtLayer0-2;
                             else
-                                vertexIndex = borderVertexIndex+borderVertexCountAtLayer0-(6-stripeIndex)*2;
+                                vertexIndex = borderVertexIndex+borderVertexCountAtLayer0-(6-stripeLatitude)*2;
                             generateVertex(vertexIndex, 'SouthEast');
                         }
                         fieldPosition2D[0] += this.fieldWidth2D;
@@ -647,9 +756,9 @@ export class IcosahedralClass1GoldbergPolyhedron {
                         glElementBuffer[outElementOffset+1] = outVertexIndex-1;
                         glElementBuffer[outElementOffset+2] = outVertexIndex;
                         glElementBuffer[outElementOffset+3] = outVertexIndex+1;
-                        glElementBuffer[outElementOffset+4] = outVertexIndex+elementOffsetAtLayer+2;
-                        glElementBuffer[outElementOffset+5] = outVertexIndex+elementOffsetAtLayer+1;
-                        glElementBuffer[outElementOffset+6] = outVertexIndex+elementOffsetAtLayer;
+                        glElementBuffer[outElementOffset+4] = outVertexIndex+elementOffset+2;
+                        glElementBuffer[outElementOffset+5] = outVertexIndex+elementOffset+1;
+                        glElementBuffer[outElementOffset+6] = outVertexIndex+elementOffset;
                         if(this.fieldsHaveCenterVertex)
                             glElementBuffer[outElementOffset+7] = outVertexIndex-1;
                         else
@@ -657,20 +766,17 @@ export class IcosahedralClass1GoldbergPolyhedron {
                         glElementBuffer[outElementOffset+8] = primitiveRestartIndex;
                         generateVertex(indexInTotal++, 'Close');
                     } else
-                        generatePoleVertices(layerIndex, stripeIndex, elementOffsetAtLayer, borderVertexCountAtLayer0);
+                        generatePoleVertices(equatorCoordinates.longitude, stripeLatitude, elementOffset, borderVertexCountAtLayer0);
                     let vertexIndex;
-                    if(indexInStripeLayer > 0 ||
-                       (stripeIndex == 0 && layerIndex > this.gpIndex*2) ||
-                       (stripeIndex > 0 && layerIndex > this.gpIndex))
+                    if(!isLeadSeam)
                         vertexIndex = borderVertexIndex++;
-                    else if(stripeIndex == 0)
+                    else if(equatorCoordinates.latitude == 0)
                         vertexIndex = borderVertexIndex+borderVertexCountAtLayer1*5-1;
                     else
                         vertexIndex = borderVertexIndex-1;
                     generateVertex(vertexIndex, 'South');
                     generateVertex(borderVertexIndex++, 'SouthEast');
-                    if(indexInStripeLayer+1 == fieldCountInStripeLayer &&
-                       (layerIndex > this.gpIndex*2 || (stripeIndex == 4 && layerIndex > this.gpIndex))) {
+                    if(isTailSeam && equatorCoordinates.longitude > this.gpIndex) {
                         fieldPosition2D[0] += this.fieldWidth2D;
                         generateVertex(borderVertexIndex++, 'South');
                     }
@@ -678,14 +784,16 @@ export class IcosahedralClass1GoldbergPolyhedron {
             }
         }
         // Generate north crown
-        for(let stripeIndex = 0; stripeIndex < 5; ++stripeIndex) {
-            this.getFieldPosition2D(fieldPosition2D, 0, stripeIndex, this.gpIndex*3-1);
-            generateVertex(borderVertexIndex+((stripeIndex == 0) ? -2 : stripeIndex*2-17), 'NorthWest');
-            generateVertex(borderVertexIndex+((stripeIndex == 0) ? 4 : -1), 'North');
+        for(let stripeLatitude = 0; stripeLatitude < 5; ++stripeLatitude) {
+            equatorCoordinates.setLatitudeAndLongitude((stripeLatitude+1)*this.gpIndex-1, this.gpIndex*3-1);
+            this.getFieldPosition2D(fieldPosition2D, equatorCoordinates);
+            generateVertex(borderVertexIndex+((stripeLatitude == 0) ? -2 : stripeLatitude*2-17), 'NorthWest');
+            generateVertex(borderVertexIndex+((stripeLatitude == 0) ? 4 : -1), 'North');
             generateVertex(borderVertexIndex++, 'NorthEast');
         }
         // Generate north pole
-        this.getFieldPosition2D(fieldPosition2D, 0, 0, this.gpIndex*3);
+        equatorCoordinates.setLatitudeAndLongitude(this.gpIndex, this.gpIndex*3);
+        this.getFieldPosition2D(fieldPosition2D, equatorCoordinates);
         generatePoleVertices(this.gpIndex*3);
         return [glVertexBuffer, glElementBuffer];
     }
@@ -698,37 +806,46 @@ export class IcosahedralClass1GoldbergPolyhedron {
         svgElement.childNodes[0].childNodes[2].setAttribute('transform', `scale(${this.edgeLength2D},${this.edgeLength2D})`);
         svgElement.childNodes[0].childNodes[1].setAttribute('stroke-width', 2.0/this.pentagonRadius2D);
         svgElement.childNodes[0].childNodes[2].setAttribute('stroke-width', 2.0/this.edgeLength2D);
-        const position2D = vec2.create();
-        const generateField = (indexInStripeLayer, stripeIndex, layerIndex) => {
-            const indexAtEquator = this.indexInStripeLayerAndStripeIndexToIndexAtEquator(indexInStripeLayer, stripeIndex, layerIndex),
-                  barycentricCubeCoordinates = this.barycentricCubeCoordinates(indexInStripeLayer, stripeIndex, layerIndex),
-                  distToClosestPole = this.distToClosestPole(barycentricCubeCoordinates),
+        const position2D = vec2.create(),
+              layerCoordinates = new LayerCoordinates(this.gpIndex),
+              equatorCoordinates = new EquatorCoordinates(this.gpIndex),
+              spiralCoordinates = new SpiralCoordinates(this.gpIndex),
+              triangleCoordinates = new TriangleCoordinates(this.gpIndex);
+        const generateField = () => {
+            equatorCoordinates.setStripeCoordinates(layerCoordinates);
+            spiralCoordinates.setLayerCoordinates(layerCoordinates);
+            triangleCoordinates.setEquatorCoordinates(equatorCoordinates);
+            const distToClosestPole = triangleCoordinates.distanceToClosestPole(),
+                  closestPole = triangleCoordinates.closestPole(),
                   isPole = (distToClosestPole == 0),
-                  closestPole = this.closestPole(barycentricCubeCoordinates),
                   tileElement = createSvgElement('use', svgElement.childNodes[1]),
                   textElement = createSvgElement('text', svgElement.childNodes[2]),
                   borderElement = createSvgElement('use', svgElement.childNodes[2]);
-            this.getFieldPosition2D(position2D, indexInStripeLayer, stripeIndex, layerIndex);
+            this.getFieldPosition2D(position2D, equatorCoordinates);
             let transform = `translate(${position2D[0]},${position2D[1]}) `;
-            if(isPole && layerIndex < this.gpIndex*1.5)
+            if(isPole && equatorCoordinates.longitude < this.gpIndex*1.5)
                 transform += 'rotate(36)';
             tileElement.setAttribute('transform', transform);
             tileElement.setAttribute('fill', '#AAA');
             tileElement.setAttribute('href', (isPole) ? '#pentagon' : '#hexagon');
             textElement.setAttribute('transform', `translate(${position2D[0]},${position2D[1]+4})`);
             textElement.setAttribute('fill', '#000');
-            textElement.textContent = `${indexAtEquator} ${layerIndex}`;
+            textElement.textContent = `${equatorCoordinates.latitude} ${equatorCoordinates.longitude}`;
             borderElement.setAttribute('transform', transform);
             borderElement.setAttribute('fill', 'none');
             borderElement.setAttribute('stroke', '#000');
             borderElement.setAttribute('href', (isPole) ? '#pentagon' : '#hexagon');
         };
-        generateField(0, 0, this.gpIndex*3);
-        generateField(0, 0, 0);
-        for(let layerIndex = this.gpIndex*3-1; layerIndex > 0; --layerIndex)
-            for(let stripeIndex = 0; stripeIndex < 5; ++stripeIndex)
-                for(let indexInStripeLayer = 0; indexInStripeLayer < this.getFieldCountInStripeLayer(layerIndex); ++indexInStripeLayer)
-                    generateField(indexInStripeLayer, stripeIndex, layerIndex);
+        generateField(); // South pole
+        layerCoordinates.longitude = this.gpIndex*3;
+        generateField(); // North pole
+        for(let longitude = this.gpIndex*3-1; longitude > 0; --longitude) {
+            layerCoordinates.longitude = longitude;
+            for(let indexInLayer = 0; indexInLayer < layerCoordinates.fieldCountInLayer(); ++indexInLayer) {
+                layerCoordinates.setIndexInLayerAndLongitude(indexInLayer, longitude);
+                generateField();
+            }
+        }
         return svgElement;
     }
 }

@@ -1,5 +1,6 @@
 import {vec2, vec3, quat, mat4} from './gl-matrix/index.js';
 import {RenderContext, Camera} from './RenderEngine.js';
+import {EquatorCoordinates} from './Geometry.js';
 import {Planet} from './Planet.js';
 
 const canvas = document.getElementById('canvas'),
@@ -17,8 +18,9 @@ renderContext.gl.uniform1f(renderContext.gl.getUniformLocation(renderContext.sur
 const hoverHandler = canvas.onmousemove = (event) => {
     const texcoord = renderContext.getTexcoordAt(renderContext.devicePixelRatio*(event.pageX-canvas.offsetLeft), canvas.height-renderContext.devicePixelRatio*(event.pageY-canvas.offsetTop));
     if(texcoord[0] > 0 || texcoord[1] > 0) {
-        const [indexInEquator, layerIndex] = planet.surfacePolyhedron.position2DToIndexAtEquator([texcoord[0]*planet.surfacePolyhedron.textureWidth, texcoord[1]*planet.surfacePolyhedron.textureHeight]);
-        message.textContent = indexInEquator+' '+layerIndex;
+        const equatorCoordinates = new EquatorCoordinates(planet.surfacePolyhedron.gpIndex);
+        planet.surfacePolyhedron.equatorCoordinatesFromPosition2D(equatorCoordinates, [texcoord[0]*planet.surfacePolyhedron.textureWidth, texcoord[1]*planet.surfacePolyhedron.textureHeight]);
+        message.textContent = equatorCoordinates.latitude+' '+equatorCoordinates.longitude;
     } else
         message.textContent = 'None';
 };
