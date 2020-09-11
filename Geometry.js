@@ -1,8 +1,27 @@
 import {vec2, vec3} from './gl-matrix/index.js';
 
-export const hexWrenchFactor = Math.sqrt(3.0), // 2.0*Math.sin(Math.PI/6.0)
-             pentagonRadiusByHexRadius = 1.0/(2.0*Math.sin(Math.PI/5.0)), // Math.sin(0.3*Math.PI)/Math.sin(0.4*Math.PI)
-             icosahedronRadiusByEdgeLength = Math.sin(Math.PI*2.0/5.0); // 0.25*Math.sqrt(10.0+2.0*Math.sqrt(5.0))
+const pentagonY = -1.0/Math.sqrt(5.0),
+      pentagonRadius = 2.0/Math.sqrt(5.0),
+      triangleAngle = Math.PI*0.25+0.5*Math.atan(0.5), // (Math.PI-Math.acos(-pentagonY))*0.5
+      hexWrenchFactor = Math.sqrt(3.0), // 2.0*Math.sin(Math.PI/6.0)
+      pentagonRadiusByHexRadius = 1.0/(2.0*Math.sin(Math.PI/5.0)), // Math.sin(0.3*Math.PI)/Math.sin(0.4*Math.PI)
+      icosahedronRadiusByEdgeLength = Math.sin(Math.PI*2.0/5.0), // 0.25*Math.sqrt(10.0+2.0*Math.sqrt(5.0))
+      icosahedronVertices = [],
+      vecCA = vec3.create(),
+      vecCB = vec3.create();
+
+// Precompute vertices of an icosahedron
+for(let i = 0; i < 12; ++i)
+    icosahedronVertices.push(vec3.create());
+icosahedronVertices[0][1] = -1.0;
+icosahedronVertices[11][1] = 1.0;
+for(let i = 0; i < 5; ++i) {
+    const angle = (1.1+i*2.0/5.0)*Math.PI;
+    icosahedronVertices[1+i][0] = Math.sin(angle)*pentagonRadius;
+    icosahedronVertices[1+i][1] = pentagonY;
+    icosahedronVertices[1+i][2] = Math.cos(angle)*pentagonRadius;
+    vec3.scale(icosahedronVertices[6+(i+3)%5], icosahedronVertices[1+i], -1.0);
+}
 
 function vec3Slerp(out, a, b, t) {
     const cos = vec3.dot(a, b)/vec3.dot(a, a),
@@ -24,8 +43,8 @@ let svgElement;
 function createSvgCanvas() {
     if(svgElement) {
         for(let i = 1; i < 3; ++i)
-            while(svgElement.childNodes[0].hasChildNodes())
-                groundLayer.removeChild(svgElement.childNodes[0].lastChild);
+            while(svgElement.childNodes[i].hasChildNodes())
+                svgElement.childNodes[i].removeChild(svgElement.childNodes[i].lastChild);
         return;
     }
     svgElement = createSvgElement('svg');
@@ -223,6 +242,96 @@ export class EquatorCoordinates {
     isPole() {
         return this.latitude%this.gpIndex == 0 && this.longitude%this.gpIndex == 0;
     }
+
+    navigate(direction) {
+        if(typeof direction == 'number') {
+            // TODO
+        } else
+            switch(direction) {
+                case '-X':
+                    if(this.longitude > this.gpIndex*2) {
+                        if(this.latitude%this.gpIndex == this.longitude%this.gpIndex) {
+                            this.latitude = (this.latitude-this.longitude-1+this.gpIndex*7)%(this.gpIndex*5);
+                            --this.longitude;
+                            return '+Z';
+                        }
+                    } else if(this.longitude > this.gpIndex) {
+                        if(this.latitude == 0) {
+                            this.latitude = this.gpIndex*5-1;
+                            return '-X';
+                        }
+                    } else {
+                        if(this.latitude%this.gpIndex == 0) {
+                            this.latitude = (this.latitude+this.longitude+this.gpIndex*4)%(this.gpIndex*5);
+                            ++this.longitude;
+                            return '+Y';
+                        }
+                    }
+                    --this.latitude;
+                    return direction;
+                case '+X':
+                    if(this.longitude > this.gpIndex*2) {
+                        if(this.latitude%this.gpIndex == this.gpIndex-1) {
+                            this.latitude = (this.latitude+this.longitude+1-this.gpIndex*2)%(this.gpIndex*5);
+                            return '-Y';
+                        }
+                    } else if(this.longitude > this.gpIndex) {
+                        if(this.latitude == this.gpIndex*5-1) {
+                            this.latitude = 0;
+                            return '+X';
+                        }
+                    } else {
+                        if((this.latitude+1)%this.gpIndex == this.longitude%this.gpIndex) {
+                            this.latitude = (this.latitude-this.longitude+1+this.gpIndex)%(this.gpIndex*5);
+                            return '-Z';
+                        }
+                    }
+                    ++this.latitude;
+                    return direction;
+                case '-Y':
+                    if(this.longitude <= this.gpIndex) {
+                        if((this.latitude+1)%this.gpIndex == this.longitude%this.gpIndex) {
+                            this.latitude = (this.latitude-this.longitude+1+this.gpIndex)%(this.gpIndex*5);
+                            if(--this.longitude == 0) // South pole
+                                this.latitude = 0;
+                            return '+X';
+                        }
+                    }
+                    --this.longitude;
+                    return direction;
+                case '+Y':
+                    if(this.longitude >= this.gpIndex*2) {
+                        if(this.latitude%this.gpIndex == this.longitude%this.gpIndex) {
+                            this.latitude = (this.latitude-this.longitude-1+this.gpIndex*7)%(this.gpIndex*5);
+                            return '-X';
+                        }
+                    }
+                    ++this.longitude;
+                    return direction;
+                case '-Z':
+                    if(this.longitude >= this.gpIndex*2) {
+                        if(this.latitude%this.gpIndex == this.gpIndex-1) {
+                            this.latitude = (this.latitude+this.longitude+2-this.gpIndex*2)%(this.gpIndex*5);
+                            if(++this.longitude == this.gpIndex*3) // North pole
+                                this.latitude = this.gpIndex;
+                            return '+X';
+                        }
+                    }
+                    this.latitude = (this.latitude+1)%(this.gpIndex*5);
+                    ++this.longitude;
+                    return direction;
+                case '+Z':
+                    if(this.longitude <= this.gpIndex) {
+                        if(this.latitude%this.gpIndex == 0) {
+                            this.latitude = (this.latitude+this.longitude-1+this.gpIndex*4)%(this.gpIndex*5);
+                            return '-X';
+                        }
+                    }
+                    this.latitude = (this.latitude-1+this.gpIndex*5)%(this.gpIndex*5);
+                    --this.longitude;
+                    return direction;
+            }
+    }
 }
 
 export class SpiralCoordinates {
@@ -339,6 +448,10 @@ export class TriangleCoordinates {
         return this.gpIndex-Math.max(Math.max(this.barycentric[0], this.barycentric[1]), this.barycentric[2]);
     }
 
+    isPole() {
+        return this.distanceToClosestPole() == 0;
+    }
+
     poleIndices() {
         switch(this.triangleLongitude) {
             case 3:
@@ -359,16 +472,79 @@ export class TriangleCoordinates {
             if(this.barycentric[i] == maxCoord)
                 return poleIndices[i];
     }
+
+    get latitude() {
+        if(this.triangleIndex == 16 && this.barycentric[2] == this.gpIndex)
+            return this.gpIndex; // North pole
+        return this.gpIndex*this.triangleLatitude+((this.triangleLongitude%2 == 0) ? this.barycentric[0] : this.gpIndex-this.barycentric[0]);
+    }
+
+    get longitude() {
+        const triangleLongitude = this.triangleLongitude;
+        return this.gpIndex*((triangleLongitude < 2) ? 1 : 2)+((triangleLongitude%2 == 0) ? -this.barycentric[2] : this.barycentric[2]);
+    }
+
+    greatRings() {
+        const result = [undefined, undefined, undefined];
+        if(this.isPole())
+            return result;
+        if(this.barycentric[2] > 0) {
+            switch(this.triangleLongitude) {
+                case 3:
+                    result[0] = (this.triangleLatitude+3)%5*this.gpIndex+this.gpIndex-this.barycentric[2];
+                    break;
+                case 2:
+                    result[0] = this.gpIndex*6-this.barycentric[2];
+                    break;
+                case 1:
+                    result[0] = this.gpIndex*5+this.barycentric[2];
+                    break;
+                case 0:
+                    result[0] = (this.triangleLatitude+1)%5*this.gpIndex+this.barycentric[2];
+                    break;
+            }
+        }
+        if(this.barycentric[0] > 0) {
+            const latitude = (this.triangleLatitude+2)%5;
+            result[1] = latitude*this.gpIndex+((this.triangleLongitude%2 == 0) ? this.gpIndex-this.barycentric[0] : this.barycentric[0]);
+        }
+        if(this.barycentric[1] > 0) {
+            const latitude = (this.triangleLongitude < 2) ? this.triangleLatitude : (this.triangleLatitude+4)%5;
+            result[2] = latitude*this.gpIndex+((this.triangleLongitude%2 == 0) ? this.gpIndex-this.barycentric[1] : this.barycentric[1]);
+        }
+        return result;
+    }
+
+    direction3D(direction, linearly) {
+        const poleIndices = this.poleIndices(),
+              a = icosahedronVertices[poleIndices[0]],
+              b = icosahedronVertices[poleIndices[1]],
+              c = icosahedronVertices[poleIndices[2]],
+              r = this.gpIndex-this.barycentric[2];
+        if(r == 0) {
+            vec3.copy(direction, c);
+            return;
+        }
+        const s = this.barycentric[1]/r,
+              t = r/this.gpIndex;
+        if(linearly) {
+            vec3.lerp(direction, a, b, s);
+            vec3.lerp(direction, c, direction, t);
+        } else {
+            vec3Slerp(vecCA, c, a, t);
+            vec3Slerp(vecCB, c, b, t);
+            vec3Slerp(direction, vecCA, vecCB, s);
+        }
+    }
 }
 
 export class IcosahedralClass1GoldbergPolyhedron {
-    constructor(abandon, fieldsHaveCenterVertex, gpIndex, edgeLength3D, edgeLength2D, yRotation=0.0) {
+    constructor(abandon, fieldsHaveCenterVertex, gpIndex=2, edgeLength3D=1.0/(2*hexWrenchFactor*icosahedronRadiusByEdgeLength), edgeLength2D=0.0) {
         this.abandon = abandon; // One of ['curvature', 'size', 'shape']
         this.fieldsHaveCenterVertex = fieldsHaveCenterVertex; // Defines if fields have an additional vertex at their center or are flat instead
         this.gpIndex = gpIndex; // Number of fields along the edge between two poles (including one of the two poles)
         this.edgeLength3D = edgeLength3D; // Edge length of the hexagons and pentagons in 3D
         this.edgeLength2D = edgeLength2D; // Edge length of the hexagons and pentagons in 2D
-        this.yRotation = yRotation; // Rotates the generated 3D positions by this angle
         this.icosahedronEdgeLength = this.gpIndex*this.edgeLength3D*hexWrenchFactor;
         this.sphereRadius = this.icosahedronEdgeLength*icosahedronRadiusByEdgeLength;
     }
@@ -377,12 +553,6 @@ export class IcosahedralClass1GoldbergPolyhedron {
         return (longitude < this.gpIndex) ? longitude*2+1 :
                (longitude < this.gpIndex*2) ? this.gpIndex*2 :
                (this.gpIndex*3-longitude)*2-1;
-    }
-
-    getFieldPosition3D(position, spiralCoordinates) {
-        const offset = spiralCoordinates.indexInTotal*3;
-        for(let i = 0; i < 3; ++i)
-            position[i] = this.positions[offset+i];
     }
 
     getFieldPosition2D(position, equatorCoordinates) {
@@ -426,25 +596,25 @@ export class IcosahedralClass1GoldbergPolyhedron {
             out[1] += Math.cos(angle)*this.pentagonRadius2D;
         } else
             switch(direction) {
-                case 'South':
+                case '+Z':
                     out[1] += this.fieldHeight2D*0.5;
                     break;
-                case 'SouthEast':
+                case '-Y':
                     out[0] += this.fieldWidth2D*0.5;
                     out[1] += this.fieldHeight2D*0.25;
                     break;
-                case 'NorthEast':
+                case '+X':
                     out[0] += this.fieldWidth2D*0.5;
                     out[1] -= this.fieldHeight2D*0.25;
                     break;
-                case 'North':
+                case '-Z':
                     out[1] -= this.fieldHeight2D*0.5;
                     break;
-                case 'NorthWest':
+                case '+Y':
                     out[0] -= this.fieldWidth2D*0.5;
                     out[1] -= this.fieldHeight2D*0.25;
                     break;
-                case 'SouthWest':
+                case '-X':
                     out[0] -= this.fieldWidth2D*0.5;
                     out[1] += this.fieldHeight2D*0.25;
                     break;
@@ -464,7 +634,8 @@ export class IcosahedralClass1GoldbergPolyhedron {
               position = vec3.create(),
               layerCoordinates = new LayerCoordinates(this.gpIndex),
               spiralCoordinates = new SpiralCoordinates(this.gpIndex),
-              triangleCoordinates = new TriangleCoordinates(this.gpIndex);
+              triangleCoordinates = new TriangleCoordinates(this.gpIndex),
+              interpolateLinearly = (this.abandon != 'shape');
         // Initialize generator functions
         const generateVertex = (offset) => {
             offset *= 3;
@@ -472,27 +643,10 @@ export class IcosahedralClass1GoldbergPolyhedron {
             this.normals[offset+0] = normal[0];
             this.normals[offset+1] = normal[1];
             this.normals[offset+2] = normal[2];
-            if(this.abandon != 'curvature')
-                vec3.scale(position, normal, this.sphereRadius);
+            vec3.scale(position, (this.abandon == 'curvature') ? position : normal, this.sphereRadius);
             this.positions[offset+0] = position[0];
             this.positions[offset+1] = position[1];
             this.positions[offset+2] = position[2];
-        };
-        /* Interpolates the triangle (A, B, C) either linearly or spherically
-         * s Goes from 0=A to 1=B
-         * t Goes from 0=C to 1=AB
-        */
-        const vecCA = vec3.create(),
-              vecCB = vec3.create();
-        const interpolateTriangle = (this.abandon == 'shape')
-            ? (a, b, c, s, t) => {
-            vec3Slerp(vecCA, c, a, t);
-            vec3Slerp(vecCB, c, b, t);
-            vec3Slerp(position, vecCA, vecCB, s);
-        }
-            : (a, b, c, s, t) => {
-            vec3.lerp(position, a, b, s);
-            vec3.lerp(position, c, position, t);
         };
         /* generateBorderVertex finds the border vertex O between the field centers (A, B, C):
                  \
@@ -507,39 +661,22 @@ export class IcosahedralClass1GoldbergPolyhedron {
         const generateBorderVertex = (a, b, c) => {
             vec3.add(position, a, b);
             vec3.add(position, position, c);
-            if(this.abandon == 'curvature')
-                vec3.scale(position, position, 1.0/3.0);
+            vec3.scale(position, position, (this.abandon == 'curvature' ? 1.0/3.0 : this.sphereRadius));
             generateVertex(borderVertexIndex++);
         };
-        // Generate 12 icosahedron poles
-        const poles = [];
-        vec3.set(position, 0, -this.sphereRadius, 0);
-        poles[0] = vec3.clone(position);
+        // Generate north and south pole
+        vec3.copy(position, icosahedronVertices[0]);
         generateVertex(0);
-        vec3.set(position, 0, this.sphereRadius, 0);
-        poles[11] = vec3.clone(position);
+        vec3.copy(position, icosahedronVertices[11]);
         generateVertex(this.fieldCount-1);
-        const pentagonY = -1.0/Math.sqrt(5.0)*this.sphereRadius,
-              pentagonRadius = 2.0/Math.sqrt(5.0)*this.sphereRadius;
-        for(let i = 0; i < 5; ++i) {
-            const angle = this.yRotation+i*Math.PI*2.0/5.0;
-            position[0] = Math.sin(angle)*pentagonRadius;
-            position[1] = pentagonY;
-            position[2] = Math.cos(angle)*pentagonRadius;
-            poles[1+i] = vec3.clone(position);
-            vec3.scale(position, position, -1.0);
-            poles[6+(i+3)%5] = vec3.clone(position);
-        }
         // Generate center vertices by barycentric interpolation
         for(let longitude = 1; longitude < this.gpIndex*3; ++longitude) {
             layerCoordinates.longitude = longitude;
             for(let indexInLayer = 0; indexInLayer < layerCoordinates.fieldCountInLayer(); ++indexInLayer) {
                 layerCoordinates.setIndexInLayerAndLongitude(indexInLayer, longitude);
                 triangleCoordinates.setStripeCoordinates(layerCoordinates);
-                const poleIndices = triangleCoordinates.poleIndices(),
-                      s = (triangleCoordinates.barycentric[1])/(this.gpIndex-triangleCoordinates.barycentric[2]),
-                      t = (this.gpIndex-triangleCoordinates.barycentric[2])/this.gpIndex;
-                interpolateTriangle(poles[poleIndices[0]], poles[poleIndices[1]], poles[poleIndices[2]], s, t);
+                triangleCoordinates.direction3D(position, interpolateLinearly);
+                vec3.scale(position, position, this.sphereRadius);
                 spiralCoordinates.setLayerCoordinates(layerCoordinates);
                 generateVertex(spiralCoordinates.indexInTotal);
             }
@@ -558,33 +695,33 @@ export class IcosahedralClass1GoldbergPolyhedron {
               upperFiledVertex = vec3.create(),
               prevLowerFiledVertex = vec3.create(),
               prevUpperFiledVertex = vec3.create();
-        for(let longitude = 0; longitude <= this.gpIndex*3; ++longitude) {
+        for(let longitude = 0; longitude < this.gpIndex*3; ++longitude) {
             const borderVertexCountAtLayer = this.getBorderVertexCountPerEdgeAtLayer(longitude),
                   hemisphere = (longitude < this.gpIndex*2) ? 0 : 1;
             let lowerIndex = 0, upperIndex = 0;
             layerCoordinates.setIndexInLayerAndLongitude(lowerIndex, longitude);
             const fieldCountInLowerLayer = layerCoordinates.fieldCountInLayer();
-            spiralCoordinates.setLayerCoordinates(layerCoordinates);
-            this.getFieldPosition3D(lowerFiledVertex, spiralCoordinates);
+            triangleCoordinates.setStripeCoordinates(layerCoordinates);
+            triangleCoordinates.direction3D(lowerFiledVertex, interpolateLinearly);
             layerCoordinates.setIndexInLayerAndLongitude(upperIndex, longitude+1);
             const fieldCountInUpperLayer = layerCoordinates.fieldCountInLayer();
-            spiralCoordinates.setLayerCoordinates(layerCoordinates);
-            this.getFieldPosition3D(upperFiledVertex, spiralCoordinates);
+            triangleCoordinates.setStripeCoordinates(layerCoordinates);
+            triangleCoordinates.direction3D(upperFiledVertex, interpolateLinearly);
             for(let stripeLatitude = 0; stripeLatitude < 5; ++stripeLatitude)
                 for(let indexInStripeLayer = 0; indexInStripeLayer < borderVertexCountAtLayer; ++indexInStripeLayer) {
                     if(indexInStripeLayer%2 == hemisphere) { // Downward Triangle
                         vec3.copy(prevUpperFiledVertex, upperFiledVertex);
                         upperIndex = (upperIndex+1)%fieldCountInUpperLayer;
                         layerCoordinates.setIndexInLayerAndLongitude(upperIndex, longitude+1);
-                        spiralCoordinates.setLayerCoordinates(layerCoordinates);
-                        this.getFieldPosition3D(upperFiledVertex, spiralCoordinates);
+                        triangleCoordinates.setStripeCoordinates(layerCoordinates);
+                        triangleCoordinates.direction3D(upperFiledVertex, interpolateLinearly);
                         generateBorderVertex(lowerFiledVertex, upperFiledVertex, prevUpperFiledVertex);
                     } else { // Upward Triangle
                         vec3.copy(prevLowerFiledVertex, lowerFiledVertex);
                         lowerIndex = (lowerIndex+1)%fieldCountInLowerLayer;
                         layerCoordinates.setIndexInLayerAndLongitude(lowerIndex, longitude);
-                        spiralCoordinates.setLayerCoordinates(layerCoordinates);
-                        this.getFieldPosition3D(lowerFiledVertex, spiralCoordinates);
+                        triangleCoordinates.setStripeCoordinates(layerCoordinates);
+                        triangleCoordinates.direction3D(lowerFiledVertex, interpolateLinearly);
                         generateBorderVertex(lowerFiledVertex, upperFiledVertex, prevLowerFiledVertex);
                     }
                 }
@@ -732,7 +869,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
                             generateVertex((equatorCoordinates.latitude < this.gpIndex)
                                 ? borderVertexIndex-2
                                 : borderVertexIndex-borderVertexCountAtLayer2*(5-stripeLatitude)-borderVertexCountAtLayer1*stripeLatitude-2
-                            , 'South');
+                            , '+Z');
                         if(isNotPole) {
                             let vertexIndex;
                             if(equatorCoordinates.longitude > this.gpIndex*2)
@@ -743,7 +880,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
                                 vertexIndex = borderVertexIndex+borderVertexCountAtLayer1*5+borderVertexCountAtLayer0-2;
                             else
                                 vertexIndex = borderVertexIndex+borderVertexCountAtLayer0-(6-stripeLatitude)*2;
-                            generateVertex(vertexIndex, 'SouthEast');
+                            generateVertex(vertexIndex, '-Y');
                         }
                         fieldPosition2D[0] += this.fieldWidth2D;
                     }
@@ -774,11 +911,11 @@ export class IcosahedralClass1GoldbergPolyhedron {
                         vertexIndex = borderVertexIndex+borderVertexCountAtLayer1*5-1;
                     else
                         vertexIndex = borderVertexIndex-1;
-                    generateVertex(vertexIndex, 'South');
-                    generateVertex(borderVertexIndex++, 'SouthEast');
+                    generateVertex(vertexIndex, '+Z');
+                    generateVertex(borderVertexIndex++, '-Y');
                     if(isTailSeam && equatorCoordinates.longitude > this.gpIndex) {
                         fieldPosition2D[0] += this.fieldWidth2D;
-                        generateVertex(borderVertexIndex++, 'South');
+                        generateVertex(borderVertexIndex++, '+Z');
                     }
                 }
             }
@@ -787,9 +924,9 @@ export class IcosahedralClass1GoldbergPolyhedron {
         for(let stripeLatitude = 0; stripeLatitude < 5; ++stripeLatitude) {
             equatorCoordinates.setLatitudeAndLongitude((stripeLatitude+1)*this.gpIndex-1, this.gpIndex*3-1);
             this.getFieldPosition2D(fieldPosition2D, equatorCoordinates);
-            generateVertex(borderVertexIndex+((stripeLatitude == 0) ? -2 : stripeLatitude*2-17), 'NorthWest');
-            generateVertex(borderVertexIndex+((stripeLatitude == 0) ? 4 : -1), 'North');
-            generateVertex(borderVertexIndex++, 'NorthEast');
+            generateVertex(borderVertexIndex+((stripeLatitude == 0) ? -2 : stripeLatitude*2-17), '+Y');
+            generateVertex(borderVertexIndex+((stripeLatitude == 0) ? 4 : -1), '-Z');
+            generateVertex(borderVertexIndex++, '+X');
         }
         // Generate north pole
         equatorCoordinates.setLatitudeAndLongitude(this.gpIndex, this.gpIndex*3);

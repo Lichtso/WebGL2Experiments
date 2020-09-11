@@ -1,12 +1,11 @@
 import {vec2, vec3, quat, mat4} from './gl-matrix/index.js';
-import {RenderContext, Camera} from './RenderEngine.js';
+import {renderContext, Camera} from './RenderEngine.js';
 import {EquatorCoordinates} from './Geometry.js';
 import {Planet} from './Planet.js';
 
 const canvas = document.getElementById('canvas'),
       unfoldSlider = document.getElementById('unfold'),
-      renderContext = new RenderContext(canvas),
-      planet = new Planet(renderContext, 10),
+      planet = new Planet(10),
       rotationVelocity = quat.create(),
       rotation = quat.create(),
       rotationAxis = vec3.create();
@@ -50,7 +49,7 @@ renderContext.renderSurface = (deltaTime) => {
 
     mat4.fromQuat(renderContext.camera.worldMatrix, rotation);
     mat4.invert(renderContext.camera.worldMatrix, renderContext.camera.worldMatrix);
-    mat4.translate(renderContext.camera.worldMatrix, renderContext.camera.worldMatrix, [0, 0, 50]);
+    mat4.translate(renderContext.camera.worldMatrix, renderContext.camera.worldMatrix, [0, 0, planet.planetRadius*3.0]);
     renderContext.camera.update();
 
     renderContext.gl.uniform1f(renderContext.gl.getUniformLocation(renderContext.surfaceShader, 'unfold'), unfoldSlider.value);

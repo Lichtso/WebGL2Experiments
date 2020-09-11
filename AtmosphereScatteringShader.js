@@ -20,7 +20,7 @@ const vec3 waveLengths = vec3(572.0, 500.0, 430.0); // g=539.5
 const vec3 scatterCoefficents = pow(vec3(400.0)/waveLengths, vec3(4.0))*1.0;
 
 uniform vec3 sunLightDirection;
-uniform vec3 planetCenter;
+uniform mat4 worldMatrix;
 uniform float atmosphereRadius;
 uniform float planetRadius;
 
@@ -37,7 +37,7 @@ float lineSphereIntersection(vec3 origin, vec3 direction, vec3 center, float rad
     return parallelDist*2.0;
 }
 
-vec3 lookupRay(vec3 position, vec3 direction) {
+vec3 lookupRay(vec3 planetCenter, vec3 position, vec3 direction) {
 	float angle = 0.5-0.5*dot(normalize(position-planetCenter), direction);
     float altitude = distance(planetCenter, position)-planetRadius;
     float normalizedAltitude = altitude/(atmosphereRadius-planetRadius);
@@ -61,6 +61,7 @@ void main() {
     vec2 fTexcoord = (fPosition.xy/fPosition.w+vec2(1.0))*0.5;
     color.a = 0.0;
 
+    vec3 planetCenter = worldMatrix[3].xyz;
     vec3 viewRayOrigin, viewRayDirection, viewRayHit;
     viewRayReconstruction(fTexcoord, viewRayOrigin, viewRayDirection, viewRayHit);
     /* viewRayOrigin = cameraWorldMatrix[3].xyz;
@@ -90,8 +91,8 @@ void main() {
     for(int i = 0; i < iterations; ++i) {
     	float t = float(i)/float(iterations-1);
         vec3 position = mix(atmosphereBegin, viewRayHit, t);
-        vec3 viewRay = lookupRay(position, viewRayDirection);
-        vec3 sunRay = lookupRay(position, sunLightDirection);
+        vec3 viewRay = lookupRay(planetCenter, position, viewRayDirection);
+        vec3 sunRay = lookupRay(planetCenter, position, sunLightDirection);
         color.rgb += exp(-(viewRay.r+sunRay.r)*scatterCoefficents)*scatterCoefficents*viewRay.g*stepSize*sunBrightness;
         color.a += viewRay.g;
     }

@@ -1,11 +1,54 @@
-import {vec3, mat4} from './gl-matrix/index.js';
+import {vec3, mat3, mat4} from './gl-matrix/index.js';
 import * as ClearShader from './ClearShader.js';
 import * as SurfaceShader from './SurfaceShader.js';
 import * as CombineShader from './CombineShader.js';
 import * as AtmosphereDensityShader from './AtmosphereDensityShader.js';
 import * as AtmosphereScatteringShader from './AtmosphereScatteringShader.js';
 
-const pixel = new Uint32Array(4);
+const pixel = new Uint32Array(4),
+      normalMatrix = mat3.create(),
+      combinedMatrix = mat4.create();
+
+export class Camera {
+    constructor() {
+        this.near = 1.0;
+        this.far = 1000.0;
+        this.worldMatrix = mat4.create();
+        this.projectionMatrix = mat4.create();
+        this.inverseCombinedMatrix = mat4.create();
+        this.combinedMatrix = mat4.create();
+    }
+
+    setPerspective(fov, aspect) {
+        mat4.perspective(this.projectionMatrix, fov, aspect, this.near, this.far);
+    }
+
+    setOrtho(width, height) {
+        mat4.ortho(this.projectionMatrix, -width, width, -height, height, this.near, this.far);
+    }
+
+    update() {
+        mat4.invert(this.combinedMatrix, this.worldMatrix);
+        mat4.multiply(this.combinedMatrix, this.projectionMatrix, this.combinedMatrix);
+        mat4.invert(this.inverseCombinedMatrix, this.combinedMatrix);
+    }
+
+    setSurfaceShaderUniforms(shader, worldMatrix) {
+        mat3.fromMat4(normalMatrix, worldMatrix);
+        renderContext.gl.uniformMatrix4fv(renderContext.gl.getUniformLocation(shader, 'worldMatrix'), false, worldMatrix);
+        renderContext.gl.uniformMatrix3fv(renderContext.gl.getUniformLocation(shader, 'normalMatrix'), false, normalMatrix);
+        renderContext.gl.uniformMatrix4fv(renderContext.gl.getUniformLocation(shader, 'cameraCombinedMatrix'), false, this.combinedMatrix);
+    }
+
+    setVolumeShaderUniforms(shader, worldMatrix) {
+        renderContext.gl.uniformMatrix4fv(renderContext.gl.getUniformLocation(shader, 'worldMatrix'), false, worldMatrix);
+        renderContext.gl.uniformMatrix4fv(renderContext.gl.getUniformLocation(shader, 'cameraProjectionMatrix'), false, this.projectionMatrix);
+        renderContext.gl.uniformMatrix4fv(renderContext.gl.getUniformLocation(shader, 'cameraInverseCombinedMatrix'), false, this.inverseCombinedMatrix);
+        renderContext.gl.uniformMatrix4fv(renderContext.gl.getUniformLocation(shader, 'cameraWorldMatrix'), false, this.worldMatrix);
+        mat4.multiply(combinedMatrix, this.combinedMatrix, worldMatrix);
+        renderContext.gl.uniformMatrix4fv(renderContext.gl.getUniformLocation(shader, 'cameraCombinedMatrix'), false, combinedMatrix);
+    }
+}
 
 export class RenderContext {
     constructor(canvas) {
@@ -239,28 +282,4 @@ export class RenderContext {
         return [pixel[0]/65535.0, pixel[1]/65535.0];
     }
 }
-
-export class Camera {
-    constructor() {
-        this.near = 1.0;
-        this.far = 1000.0;
-        this.worldMatrix = mat4.create();
-        this.projectionMatrix = mat4.create();
-        this.inverseCombinedMatrix = mat4.create();
-        this.combinedMatrix = mat4.create();
-    }
-
-    setPerspective(fov, aspect) {
-        mat4.perspective(this.projectionMatrix, fov, aspect, this.near, this.far);
-    }
-
-    setOrtho(width, height) {
-        mat4.ortho(this.projectionMatrix, -width, width, -height, height, this.near, this.far);
-    }
-
-    update() {
-        mat4.invert(this.combinedMatrix, this.worldMatrix);
-        mat4.multiply(this.combinedMatrix, this.projectionMatrix, this.combinedMatrix);
-        mat4.invert(this.inverseCombinedMatrix, this.combinedMatrix);
-    }
-}
+export const renderContext = new RenderContext(document.getElementById('canvas'));
