@@ -2,13 +2,14 @@ import {vec2, vec3} from './gl-matrix/index.js';
 
 const pentagonY = -1.0/Math.sqrt(5.0),
       pentagonRadius = 2.0/Math.sqrt(5.0),
-      triangleAngle = Math.PI*0.25+0.5*Math.atan(0.5), // (Math.PI-Math.acos(-pentagonY))*0.5
       hexWrenchFactor = Math.sqrt(3.0), // 2.0*Math.sin(Math.PI/6.0)
       pentagonRadiusByHexRadius = 1.0/(2.0*Math.sin(Math.PI/5.0)), // Math.sin(0.3*Math.PI)/Math.sin(0.4*Math.PI)
       icosahedronRadiusByEdgeLength = Math.sin(Math.PI*2.0/5.0), // 0.25*Math.sqrt(10.0+2.0*Math.sqrt(5.0))
       icosahedronVertices = [],
-      vecCA = vec3.create(),
-      vecCB = vec3.create();
+      auxA = vec3.create(),
+      auxB = vec3.create(),
+      auxC = vec3.create(),
+      auxD = vec3.create();
 
 // Precompute vertices of an icosahedron
 for(let i = 0; i < 12; ++i)
@@ -22,14 +23,49 @@ for(let i = 0; i < 5; ++i) {
     icosahedronVertices[1+i][2] = Math.cos(angle)*pentagonRadius;
     vec3.scale(icosahedronVertices[6+(i+3)%5], icosahedronVertices[1+i], -1.0);
 }
+const triangleAngle = Math.acos(icosahedronVertices[10][1]);
 
 function vec3Slerp(out, a, b, t) {
     const cos = vec3.dot(a, b)/vec3.dot(a, a),
-          angle = Math.acos(cos),
-          aux = vec3.create();
-    vec3.scale(aux, a, Math.sin((1.0-t)*angle));
-    vec3.scaleAndAdd(aux, aux, b, Math.sin(t*angle));
-    vec3.scale(out, aux, 1.0/Math.sqrt(1.0-cos*cos));
+          angle = Math.acos(cos);
+    vec3.scale(auxA, a, Math.sin((1.0-t)*angle));
+    vec3.scaleAndAdd(auxA, auxA, b, Math.sin(t*angle));
+    vec3.scale(out, auxA, 1.0/Math.sqrt(1.0-cos*cos));
+}
+
+function halfPlaneSide(direction, poleIndexA, poleIndexB) {
+    vec3.cross(auxA, icosahedronVertices[poleIndexA], icosahedronVertices[poleIndexB]);
+    return vec3.dot(direction, auxA) > 0.0;
+}
+
+function barycentricInterpolation(point, barycentric, poles, angularInterpolation) {
+    if(angularInterpolation)
+        for(let i = 0; i < 3; ++i)
+            barycentric[i] = Math.sin(barycentric[i]*triangleAngle);
+    vec3.scale(point, poles[0], barycentric[0]);
+    vec3.scaleAndAdd(point, point, poles[1], barycentric[1]);
+    vec3.scaleAndAdd(point, point, poles[2], barycentric[2]);
+    if(angularInterpolation)
+        vec3.normalize(point, point);
+}
+
+function inverseBarycentricInterpolation(barycentric, point, poles, angularInterpolation) {
+    let sum = 0.0;
+    for(let i = 0; i < 3; ++i) {
+        if(angularInterpolation) {
+            vec3.cross(auxA, poles[(i+1)%3], poles[(i+2)%3]);
+            vec3.cross(auxB, poles[i], point);
+            vec3.cross(auxC, auxB, auxA);
+            vec3.normalize(auxC, auxC);
+            barycentric[i] = vec3.angle(point, auxC)/vec3.angle(poles[i], auxC);
+        } else {
+            vec3.cross(auxC, poles[(i+1)%3], poles[(i+2)%3]);
+            vec3.normalize(auxC, auxC);
+            barycentric[i] = vec3.dot(point, auxC)/vec3.dot(poles[i], auxC);
+        }
+        sum += barycentric[i];
+    }
+    vec3.scale(barycentric, barycentric, 1.0/sum);
 }
 
 function createSvgElement(tag, parentNode) {
@@ -332,6 +368,49 @@ export class EquatorCoordinates {
                     return direction;
             }
     }
+
+    static *getShortestPath(equatorCoordinatesA, equatorCoordinatesB, angularInterpolation) {
+        const currentCoordinates = new EquatorCoordinates(equatorCoordinatesA.gpIndex),
+              neighborCoordinates = new EquatorCoordinates(equatorCoordinatesA.gpIndex),
+              nextCoordinates = new EquatorCoordinates(equatorCoordinatesA.gpIndex),
+              triangleCoordinates = new TriangleCoordinates(equatorCoordinatesA.gpIndex),
+              dirA = vec3.create(),
+              dirB = vec3.create(),
+              dirC = vec3.create(),
+              dirD = vec3.create(),
+              normal = vec3.create();
+        currentCoordinates.setLatitudeAndLongitude(equatorCoordinatesB.latitude, equatorCoordinatesB.longitude);
+        triangleCoordinates.setStripeCoordinates(currentCoordinates);
+        triangleCoordinates.direction3D(dirB, angularInterpolation);
+        currentCoordinates.setLatitudeAndLongitude(equatorCoordinatesA.latitude, equatorCoordinatesA.longitude);
+        triangleCoordinates.setStripeCoordinates(currentCoordinates);
+        triangleCoordinates.direction3D(dirA, angularInterpolation);
+        vec3.normalize(dirA, dirA);
+        vec3.normalize(dirB, dirB);
+        vec3.cross(normal, dirA, dirB);
+        while(true) {
+            yield currentCoordinates;
+            if(currentCoordinates.latitude == equatorCoordinatesB.latitude && currentCoordinates.longitude == equatorCoordinatesB.longitude)
+                break;
+            triangleCoordinates.setStripeCoordinates(currentCoordinates);
+            triangleCoordinates.direction3D(dirC, angularInterpolation);
+            const maxAngle = vec3.angle(dirC, dirB);
+            let minimum = Infinity;
+            for(let direction of ['-X', '+X', '-Y', '+Y', '-Z', '+Z']) {
+                neighborCoordinates.setLatitudeAndLongitude(currentCoordinates.latitude, currentCoordinates.longitude);
+                neighborCoordinates.navigate(direction);
+                triangleCoordinates.setStripeCoordinates(neighborCoordinates);
+                triangleCoordinates.direction3D(dirD, angularInterpolation);
+                const error = Math.abs(vec3.dot(dirD, normal));
+                if(vec3.angle(dirD, dirB) < maxAngle && error < minimum) {
+                    minimum = error;
+                    nextCoordinates.setLatitudeAndLongitude(neighborCoordinates.latitude, neighborCoordinates.longitude);
+                    vec3.copy(dirC, dirD);
+                }
+            }
+            currentCoordinates.setLatitudeAndLongitude(nextCoordinates.latitude, nextCoordinates.longitude);
+        }
+    }
 }
 
 export class SpiralCoordinates {
@@ -436,6 +515,25 @@ export class TriangleCoordinates {
         this.barycentric[1] = this.gpIndex-(this.barycentric[0]+this.barycentric[2]);
     }
 
+    round(barycentric) {
+        vec3.round(auxA, barycentric);
+        vec3.sub(auxB, auxA, barycentric);
+        let max = 0.0;
+        for(let i = 0; i < 3; ++i) {
+            auxB[i] = Math.abs(auxB);
+            max = Math.max(max, auxB[i]);
+        }
+        if(auxB[0] == max)
+            auxA[0] = -auxA[1]-auxA[2];
+        else if(auxB[1] == max)
+            auxA[1] = -auxA[0]-auxA[2];
+        else // if(auxB[2] == max)
+            auxA[2] = -auxA[0]-auxA[1];
+        this.barycentric[0] = this.gpIndex-(auxA[1]+auxA[2]);
+        this.barycentric[1] = auxA[1];
+        this.barycentric[2] = auxA[2];
+    }
+
     get triangleLatitude() {
         return this.triangleIndex%5;
     }
@@ -484,6 +582,32 @@ export class TriangleCoordinates {
         return this.gpIndex*((triangleLongitude < 2) ? 1 : 2)+((triangleLongitude%2 == 0) ? -this.barycentric[2] : this.barycentric[2]);
     }
 
+    direction3D(direction, angularInterpolation) {
+        vec3.scale(auxD, this.barycentric, 1.0/this.gpIndex);
+        barycentricInterpolation(direction, auxD, this.poleIndices().map(i => icosahedronVertices[i]), angularInterpolation);
+    }
+
+    fromDirection3D(direction, angularInterpolation) {
+        vec3.normalize(direction, direction);
+        const latitude = Math.atan2(direction[0], direction[2])/Math.PI,
+              triangleLatitudeSouth = Math.floor((7.25+latitude*2.5)%5.0),
+              triangleLatitudeNorth = Math.floor((7.75+latitude*2.5)%5.0);
+        if(halfPlaneSide(direction, 1+(triangleLatitudeSouth+1)%5, 1+triangleLatitudeSouth))
+            this.triangleIndex = triangleLatitudeSouth;
+        else if(halfPlaneSide(direction, 6+triangleLatitudeNorth, 6+(triangleLatitudeNorth+1)%5))
+            this.triangleIndex = 15+triangleLatitudeNorth;
+        else if(halfPlaneSide(direction, 6+triangleLatitudeNorth, 1+triangleLatitudeNorth) &&
+                halfPlaneSide(direction, 1+triangleLatitudeNorth, 6+(triangleLatitudeNorth+1)%5))
+            this.triangleIndex = 10+triangleLatitudeNorth;
+        else
+            this.triangleIndex = 5+triangleLatitudeSouth;
+        inverseBarycentricInterpolation(auxD, direction, this.poleIndices().map(i => icosahedronVertices[i]), angularInterpolation);
+        vec3.scale(auxD, auxD, this.gpIndex);
+        vec3.copy(this.barycentric, auxA);
+        auxD[0] = -(auxD[1]+auxD[2]);
+        this.round(auxD);
+    }
+
     greatRings() {
         const result = [undefined, undefined, undefined];
         if(this.isPole())
@@ -513,28 +637,6 @@ export class TriangleCoordinates {
             result[2] = latitude*this.gpIndex+((this.triangleLongitude%2 == 0) ? this.gpIndex-this.barycentric[1] : this.barycentric[1]);
         }
         return result;
-    }
-
-    direction3D(direction, linearly) {
-        const poleIndices = this.poleIndices(),
-              a = icosahedronVertices[poleIndices[0]],
-              b = icosahedronVertices[poleIndices[1]],
-              c = icosahedronVertices[poleIndices[2]],
-              r = this.gpIndex-this.barycentric[2];
-        if(r == 0) {
-            vec3.copy(direction, c);
-            return;
-        }
-        const s = this.barycentric[1]/r,
-              t = r/this.gpIndex;
-        if(linearly) {
-            vec3.lerp(direction, a, b, s);
-            vec3.lerp(direction, c, direction, t);
-        } else {
-            vec3Slerp(vecCA, c, a, t);
-            vec3Slerp(vecCB, c, b, t);
-            vec3Slerp(direction, vecCA, vecCB, s);
-        }
     }
 }
 
@@ -635,7 +737,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
               layerCoordinates = new LayerCoordinates(this.gpIndex),
               spiralCoordinates = new SpiralCoordinates(this.gpIndex),
               triangleCoordinates = new TriangleCoordinates(this.gpIndex),
-              interpolateLinearly = (this.abandon != 'shape');
+              angularInterpolation = (this.abandon == 'shape');
         // Initialize generator functions
         const generateVertex = (offset) => {
             offset *= 3;
@@ -675,7 +777,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
             for(let indexInLayer = 0; indexInLayer < layerCoordinates.fieldCountInLayer(); ++indexInLayer) {
                 layerCoordinates.setIndexInLayerAndLongitude(indexInLayer, longitude);
                 triangleCoordinates.setStripeCoordinates(layerCoordinates);
-                triangleCoordinates.direction3D(position, interpolateLinearly);
+                triangleCoordinates.direction3D(position, angularInterpolation);
                 vec3.scale(position, position, this.sphereRadius);
                 spiralCoordinates.setLayerCoordinates(layerCoordinates);
                 generateVertex(spiralCoordinates.indexInTotal);
@@ -702,11 +804,11 @@ export class IcosahedralClass1GoldbergPolyhedron {
             layerCoordinates.setIndexInLayerAndLongitude(lowerIndex, longitude);
             const fieldCountInLowerLayer = layerCoordinates.fieldCountInLayer();
             triangleCoordinates.setStripeCoordinates(layerCoordinates);
-            triangleCoordinates.direction3D(lowerFiledVertex, interpolateLinearly);
+            triangleCoordinates.direction3D(lowerFiledVertex, angularInterpolation);
             layerCoordinates.setIndexInLayerAndLongitude(upperIndex, longitude+1);
             const fieldCountInUpperLayer = layerCoordinates.fieldCountInLayer();
             triangleCoordinates.setStripeCoordinates(layerCoordinates);
-            triangleCoordinates.direction3D(upperFiledVertex, interpolateLinearly);
+            triangleCoordinates.direction3D(upperFiledVertex, angularInterpolation);
             for(let stripeLatitude = 0; stripeLatitude < 5; ++stripeLatitude)
                 for(let indexInStripeLayer = 0; indexInStripeLayer < borderVertexCountAtLayer; ++indexInStripeLayer) {
                     if(indexInStripeLayer%2 == hemisphere) { // Downward Triangle
@@ -714,14 +816,14 @@ export class IcosahedralClass1GoldbergPolyhedron {
                         upperIndex = (upperIndex+1)%fieldCountInUpperLayer;
                         layerCoordinates.setIndexInLayerAndLongitude(upperIndex, longitude+1);
                         triangleCoordinates.setStripeCoordinates(layerCoordinates);
-                        triangleCoordinates.direction3D(upperFiledVertex, interpolateLinearly);
+                        triangleCoordinates.direction3D(upperFiledVertex, angularInterpolation);
                         generateBorderVertex(lowerFiledVertex, upperFiledVertex, prevUpperFiledVertex);
                     } else { // Upward Triangle
                         vec3.copy(prevLowerFiledVertex, lowerFiledVertex);
                         lowerIndex = (lowerIndex+1)%fieldCountInLowerLayer;
                         layerCoordinates.setIndexInLayerAndLongitude(lowerIndex, longitude);
                         triangleCoordinates.setStripeCoordinates(layerCoordinates);
-                        triangleCoordinates.direction3D(lowerFiledVertex, interpolateLinearly);
+                        triangleCoordinates.direction3D(lowerFiledVertex, angularInterpolation);
                         generateBorderVertex(lowerFiledVertex, upperFiledVertex, prevLowerFiledVertex);
                     }
                 }
