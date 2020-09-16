@@ -1,4 +1,4 @@
-import {vec3, mat3, mat4} from './gl-matrix/index.js';
+import {vec3, vec4, mat3, mat4} from './gl-matrix/index.js';
 import * as ClearShader from './ClearShader.js';
 import * as SurfaceShader from './SurfaceShader.js';
 import * as CombineShader from './CombineShader.js';
@@ -47,6 +47,23 @@ export class Camera {
         renderContext.gl.uniformMatrix4fv(renderContext.gl.getUniformLocation(shader, 'cameraWorldMatrix'), false, this.worldMatrix);
         mat4.multiply(combinedMatrix, this.combinedMatrix, worldMatrix);
         renderContext.gl.uniformMatrix4fv(renderContext.gl.getUniformLocation(shader, 'cameraCombinedMatrix'), false, combinedMatrix);
+    }
+
+    getViewRay(viewRayOrigin, viewRayDirection, event) {
+        const ndcPos = vec3.create();
+        ndcPos[0] = (event.pageX-renderContext.gl.canvas.offsetLeft)/renderContext.gl.canvas.width*renderContext.devicePixelRatio*2.0-1.0;
+        ndcPos[1] = 1.0-(event.pageY-renderContext.gl.canvas.offsetTop)/renderContext.gl.canvas.height*renderContext.devicePixelRatio*2.0;
+        ndcPos[2] = 0.0;
+        const clipPos = vec4.create();
+        clipPos[3] = this.projectionMatrix[14]/(ndcPos[2]-this.projectionMatrix[10]/this.projectionMatrix[11]);
+        clipPos[0] = ndcPos[0]*clipPos[3];
+        clipPos[1] = ndcPos[1]*clipPos[3];
+        clipPos[2] = ndcPos[2]*clipPos[3];
+        vec3.set(viewRayOrigin, this.worldMatrix[12], this.worldMatrix[13], this.worldMatrix[14]);
+        const viewRayHit = vec4.create();
+        vec4.transformMat4(viewRayHit, clipPos, this.inverseCombinedMatrix);
+        vec3.sub(viewRayDirection, viewRayHit, viewRayOrigin);
+        vec3.normalize(viewRayDirection, viewRayDirection);
     }
 }
 

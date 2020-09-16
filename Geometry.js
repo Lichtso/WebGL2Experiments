@@ -1,4 +1,4 @@
-import {vec2, vec3} from './gl-matrix/index.js';
+import {vec2, vec3, mat4} from './gl-matrix/index.js';
 
 const pentagonY = -1.0/Math.sqrt(5.0),
       pentagonRadius = 2.0/Math.sqrt(5.0),
@@ -9,7 +9,8 @@ const pentagonY = -1.0/Math.sqrt(5.0),
       auxA = vec3.create(),
       auxB = vec3.create(),
       auxC = vec3.create(),
-      auxD = vec3.create();
+      auxD = vec3.create(),
+      inverseMatrix = mat4.create();
 
 // Precompute vertices of an icosahedron
 for(let i = 0; i < 12; ++i)
@@ -25,12 +26,17 @@ for(let i = 0; i < 5; ++i) {
 }
 const triangleAngle = Math.acos(icosahedronVertices[10][1]);
 
-function vec3Slerp(out, a, b, t) {
-    const cos = vec3.dot(a, b)/vec3.dot(a, a),
-          angle = Math.acos(cos);
-    vec3.scale(auxA, a, Math.sin((1.0-t)*angle));
-    vec3.scaleAndAdd(auxA, auxA, b, Math.sin(t*angle));
-    vec3.scale(out, auxA, 1.0/Math.sqrt(1.0-cos*cos));
+function raySphereIntersection(intersections, origin, direction, sphereRadius) {
+    vec3.scale(auxB, direction, vec3.dot(origin, direction));
+    vec3.sub(auxA, origin, auxB);
+    const orthogonalDist = vec3.length(auxA);
+    if(orthogonalDist > sphereRadius)
+        return 0.0;
+    const parallelDist = Math.sin(Math.acos(orthogonalDist/sphereRadius))*sphereRadius;
+    vec3.sub(intersections[1], origin, auxB);
+    vec3.scaleAndAdd(intersections[0], intersections[1], direction, -parallelDist);
+    vec3.scaleAndAdd(intersections[1], intersections[1], direction, parallelDist);
+    return parallelDist*2.0;
 }
 
 function halfPlaneSide(direction, poleIndexA, poleIndexB) {
@@ -52,17 +58,15 @@ function barycentricInterpolation(point, barycentric, poles, angularInterpolatio
 function inverseBarycentricInterpolation(barycentric, point, poles, angularInterpolation) {
     let sum = 0.0;
     for(let i = 0; i < 3; ++i) {
+        vec3.cross(auxA, poles[(i+1)%3], poles[(i+2)%3]);
+        vec3.normalize(auxA, auxA);
+        let dotA = vec3.dot(point, auxA),
+            dotB = vec3.dot(poles[i], auxA);
         if(angularInterpolation) {
-            vec3.cross(auxA, poles[(i+1)%3], poles[(i+2)%3]);
-            vec3.cross(auxB, poles[i], point);
-            vec3.cross(auxC, auxB, auxA);
-            vec3.normalize(auxC, auxC);
-            barycentric[i] = vec3.angle(point, auxC)/vec3.angle(poles[i], auxC);
-        } else {
-            vec3.cross(auxC, poles[(i+1)%3], poles[(i+2)%3]);
-            vec3.normalize(auxC, auxC);
-            barycentric[i] = vec3.dot(point, auxC)/vec3.dot(poles[i], auxC);
+            dotA = Math.asin(dotA);
+            dotB = Math.asin(dotB);
         }
+        barycentric[i] = dotA/dotB;
         sum += barycentric[i];
     }
     vec3.scale(barycentric, barycentric, 1.0/sum);
@@ -520,7 +524,7 @@ export class TriangleCoordinates {
         vec3.sub(auxB, auxA, barycentric);
         let max = 0.0;
         for(let i = 0; i < 3; ++i) {
-            auxB[i] = Math.abs(auxB);
+            auxB[i] = Math.abs(auxB[i]);
             max = Math.max(max, auxB[i]);
         }
         if(auxB[0] == max)
@@ -589,7 +593,8 @@ export class TriangleCoordinates {
 
     fromDirection3D(direction, angularInterpolation) {
         vec3.normalize(direction, direction);
-        const latitude = Math.atan2(direction[0], direction[2])/Math.PI,
+        const longitude = 1.0-Math.acos(direction[1])/Math.PI,
+              latitude = Math.atan2(direction[0], direction[2])/Math.PI,
               triangleLatitudeSouth = Math.floor((7.25+latitude*2.5)%5.0),
               triangleLatitudeNorth = Math.floor((7.75+latitude*2.5)%5.0);
         if(halfPlaneSide(direction, 1+(triangleLatitudeSouth+1)%5, 1+triangleLatitudeSouth))
@@ -601,11 +606,54 @@ export class TriangleCoordinates {
             this.triangleIndex = 10+triangleLatitudeNorth;
         else
             this.triangleIndex = 5+triangleLatitudeSouth;
-        inverseBarycentricInterpolation(auxD, direction, this.poleIndices().map(i => icosahedronVertices[i]), angularInterpolation);
-        vec3.scale(auxD, auxD, this.gpIndex);
-        vec3.copy(this.barycentric, auxA);
-        auxD[0] = -(auxD[1]+auxD[2]);
-        this.round(auxD);
+        const prevPoleIndices = this.poleIndices();
+        inverseBarycentricInterpolation(auxB, direction, prevPoleIndices.map(i => icosahedronVertices[i]), angularInterpolation);
+        vec3.scale(auxB, auxB, this.gpIndex);
+        vec3.copy(this.barycentric, auxB);
+        auxB[0] = -(auxB[1]+auxB[2]);
+        this.round(auxB);
+        // Normalize edge cases
+        const prevTriangleIndex = this.triangleIndex;
+        if(this.barycentric[0] == this.gpIndex || this.barycentric[1] == this.gpIndex || this.barycentric[2] == this.gpIndex) {
+            switch(Math.round(longitude*4)) {
+                case 4: // North pole
+                    this.triangleIndex = 16;
+                    break;
+                case 3: // Northern poles
+                    this.triangleIndex = 10+(triangleLatitudeSouth+1)%5;
+                    break;
+                case 1: // Southern poles
+                    this.triangleIndex = 5+triangleLatitudeNorth;
+                    break;
+                case 0: // South pole
+                    this.triangleIndex = 0;
+                    break;
+            }
+        } else if(this.barycentric[2] == 0) {
+            if(this.triangleIndex < 5)
+                this.triangleIndex += 5;
+            else if(this.triangleIndex >= 15)
+                this.triangleIndex -= 5;
+        } else if(this.triangleIndex >= 5 && this.triangleIndex < 15) {
+            if(this.barycentric[1] == 0)
+                this.triangleIndex = 5+triangleLatitudeSouth;
+            else if(this.barycentric[0] == 0)
+                this.triangleIndex = 10+triangleLatitudeNorth;
+        } else if(this.triangleIndex >= 15) {
+            if(this.barycentric[0] == 0 || this.barycentric[1] == 0)
+                this.triangleIndex = 15+(triangleLatitudeSouth+1)%5;
+        } else if(this.triangleIndex < 5) {
+            if(this.barycentric[0] == 0 || this.barycentric[1] == 0)
+                this.triangleIndex = triangleLatitudeNorth;
+        }
+        if(this.triangleIndex != prevTriangleIndex) {
+            const prevBarycentric = this.barycentric.slice(),
+                  poleIndices = this.poleIndices();
+            for(let i = 0; i < 3; ++i) {
+                const j = prevPoleIndices.indexOf(poleIndices[i]);
+                this.barycentric[i] = (j == -1) ? 0 : prevBarycentric[j];
+            }
+        }
     }
 
     greatRings() {
@@ -651,10 +699,17 @@ export class IcosahedralClass1GoldbergPolyhedron {
         this.sphereRadius = this.icosahedronEdgeLength*icosahedronRadiusByEdgeLength;
     }
 
-    getBorderVertexCountPerEdgeAtLayer(longitude) {
+    getBorderVertexCountPerEdgeAtLongitude(longitude) {
         return (longitude < this.gpIndex) ? longitude*2+1 :
                (longitude < this.gpIndex*2) ? this.gpIndex*2 :
                (this.gpIndex*3-longitude)*2-1;
+    }
+
+    rayIntersection(intersections, worldMatrix, origin, direction) {
+        mat4.invert(inverseMatrix, worldMatrix);
+        vec3.transformMat4(auxC, origin, inverseMatrix);
+        vec3.transformMat4(auxD, direction, inverseMatrix);
+        return raySphereIntersection(intersections, auxC, auxD, this.sphereRadius);
     }
 
     getFieldPosition2D(position, equatorCoordinates) {
@@ -798,7 +853,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
               prevLowerFiledVertex = vec3.create(),
               prevUpperFiledVertex = vec3.create();
         for(let longitude = 0; longitude < this.gpIndex*3; ++longitude) {
-            const borderVertexCountAtLayer = this.getBorderVertexCountPerEdgeAtLayer(longitude),
+            const borderVertexCountAtLayer = this.getBorderVertexCountPerEdgeAtLongitude(longitude),
                   hemisphere = (longitude < this.gpIndex*2) ? 0 : 1;
             let lowerIndex = 0, upperIndex = 0;
             layerCoordinates.setIndexInLayerAndLongitude(lowerIndex, longitude);
@@ -932,9 +987,9 @@ export class IcosahedralClass1GoldbergPolyhedron {
         // Copy and interleave vertices
         for(let longitude = 1; longitude < this.gpIndex*3; ++longitude) {
             layerCoordinates.longitude = longitude;
-            const borderVertexCountAtLayer0 = this.getBorderVertexCountPerEdgeAtLayer(longitude)*5,
-                  borderVertexCountAtLayer1 = this.getBorderVertexCountPerEdgeAtLayer(longitude-1),
-                  borderVertexCountAtLayer2 = this.getBorderVertexCountPerEdgeAtLayer(longitude-2);
+            const borderVertexCountAtLayer0 = this.getBorderVertexCountPerEdgeAtLongitude(longitude)*5,
+                  borderVertexCountAtLayer1 = this.getBorderVertexCountPerEdgeAtLongitude(longitude-1),
+                  borderVertexCountAtLayer2 = this.getBorderVertexCountPerEdgeAtLongitude(longitude-2);
             let elementCountAtLayer;
             if(longitude < this.gpIndex)
                 elementCountAtLayer = longitude*10+5;

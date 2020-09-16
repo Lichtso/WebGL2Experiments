@@ -50,7 +50,7 @@ uniform mat4 cameraInverseCombinedMatrix;
 uniform mat4 cameraWorldMatrix;
 void viewRayReconstruction(vec2 fTexcoord, out vec3 viewRayOrigin, out vec3 viewRayDirection, out vec3 viewRayHit) {
     vec3 ndcPos = vec3(fTexcoord, texture(depthMap, fTexcoord).x)*2.0-vec3(1.0);
-	vec4 clipPos = vec4(ndcPos, cameraProjectionMatrix[3][2]/(ndcPos.z-(cameraProjectionMatrix[2][2]/cameraProjectionMatrix[2][3])));
+	vec4 clipPos = vec4(ndcPos, cameraProjectionMatrix[3][2]/(ndcPos.z-cameraProjectionMatrix[2][2]/cameraProjectionMatrix[2][3]));
 	clipPos.xyz *= clipPos.w;
     viewRayOrigin = cameraWorldMatrix[3].xyz;
     viewRayHit = (cameraInverseCombinedMatrix*clipPos).xyz;
