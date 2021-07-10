@@ -14,14 +14,16 @@ renderContext.camera.update();
 renderContext.gl.useProgram(renderContext.surfaceShader);
 renderContext.gl.uniform1f(renderContext.gl.getUniformLocation(renderContext.surfaceShader, 'sphereRadius'), planet.surfacePolyhedron.sphereRadius);
 renderContext.gl.uniform1f(renderContext.gl.getUniformLocation(renderContext.surfaceShader, 'widthInRadians'), planet.surfacePolyhedron.textureWidth/(planet.surfacePolyhedron.fieldWidth2D*planet.surfacePolyhedron.gpIndex*5)*Math.PI*2.0);
-const hoverHandler = canvas.onmousemove = (event) => {
+canvas.ondblclick = (event) => {
     const texcoord = renderContext.getTexcoordAt(renderContext.devicePixelRatio*(event.pageX-canvas.offsetLeft), canvas.height-renderContext.devicePixelRatio*(event.pageY-canvas.offsetTop));
     if(texcoord[0] > 0 || texcoord[1] > 0) {
         const equatorCoordinates = new EquatorCoordinates(planet.surfacePolyhedron.gpIndex);
         planet.surfacePolyhedron.equatorCoordinatesFromPosition2D(equatorCoordinates, [texcoord[0]*planet.surfacePolyhedron.textureWidth, texcoord[1]*planet.surfacePolyhedron.textureHeight]);
+        renderContext.imageToTexture(planet.surfaceTexture, planet.surfacePolyhedron.generateTextureImage(equatorCoordinates)).then(renderContext.startRenderLoop.bind(renderContext))
         message.textContent = equatorCoordinates.latitude+' '+equatorCoordinates.longitude;
-    } else
+    } else {
         message.textContent = 'None';
+    }
 };
 canvas.onmousedown = (event) => {
     const dragOrigin = vec2.fromValues(event.pageX, event.pageY),
@@ -37,7 +39,7 @@ canvas.onmousedown = (event) => {
     };
 };
 canvas.onmouseup = canvas.onmouseout = (event) => {
-    canvas.onmousemove = hoverHandler;
+    canvas.onmousemove = undefined;
 };
 renderContext.renderSurface = (deltaTime) => {
     const angularVelocity = quat.getAxisAngle(rotationAxis, rotationVelocity)*0.9;
@@ -47,16 +49,18 @@ renderContext.renderSurface = (deltaTime) => {
     quat.multiply(rotation, rotationVelocity, rotation);
     quat.normalize(rotation, rotation);
 
+    // mat4.fromRotationTranslation(renderContext.camera.worldMatrix, rotation, [0, 0, 50]);
     mat4.fromQuat(renderContext.camera.worldMatrix, rotation);
     mat4.invert(renderContext.camera.worldMatrix, renderContext.camera.worldMatrix);
     mat4.translate(renderContext.camera.worldMatrix, renderContext.camera.worldMatrix, [0, 0, planet.planetRadius*3.0]);
     renderContext.camera.update();
 
+    // mat4.fromQuat(planet.worldMatrix, rotation);
     renderContext.gl.uniform1f(renderContext.gl.getUniformLocation(renderContext.surfaceShader, 'unfold'), unfoldSlider.value);
     planet.renderSurface(renderContext);
 };
 renderContext.renderVolume = () => {
-    planet.renderVolume(renderContext);
+    // planet.renderVolume(renderContext);
 };
 unfoldSlider.oninput = renderContext.startRenderLoop.bind(renderContext);
 document.body.onkeydown = (event) => {

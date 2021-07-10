@@ -39,6 +39,25 @@ function raySphereIntersection(intersections, origin, direction, sphereRadius) {
     return parallelDist*2.0;
 }
 
+/*function vec3Slerp(out, a, b, t) {
+    const cos = vec3.dot(a, b)/vec3.dot(a, a),
+          angle = Math.acos(cos);
+    vec3.scale(auxA, a, Math.sin((1.0-t)*angle));
+    vec3.scaleAndAdd(auxA, auxA, b, Math.sin(t*angle));
+    vec3.scale(out, auxA, 1.0/Math.sqrt(1.0-cos*cos));
+}
+
+/*function quatToEuler(out, q) {
+    const sinr_cosp = 2*(q[3]*q[0]+q[1]*q[2]),
+          cosr_cosp = 1.0-2.0*(q[0]*q[0]+q[1]*q[1]);
+    out[0] = Math.atan2(sinr_cosp, cosr_cosp);
+    const sinp = 2 * (q[3]*q[1]-q[2]*q[0]);
+    out[1] = (Math.abs(sinp) >= 1) ? Math.PI/2*Math.sign(sinp) : Math.asin(sinp);
+    const siny_cosp = 2.0*(q[3]*q[2]+q[0]*q[1]),
+          cosy_cosp = 1.0-2.0*(q[1]*q[1]+q[2]*q[2]);
+    out[2] = Math.atan2(siny_cosp, cosy_cosp);
+}*/
+
 function halfPlaneSide(direction, poleIndexA, poleIndexB) {
     vec3.cross(auxA, icosahedronVertices[poleIndexA], icosahedronVertices[poleIndexB]);
     return vec3.dot(direction, auxA) > 0.0;
@@ -87,7 +106,7 @@ function createSvgCanvas() {
                 svgElement.childNodes[i].removeChild(svgElement.childNodes[i].lastChild);
         return;
     }
-    svgElement = createSvgElement('svg');
+    svgElement = createSvgElement('svg'); // , document.body); // TODO
     svgElement.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
     svgElement.setAttribute('version', '1.1');
     svgElement.setAttribute('text-anchor', 'middle');
@@ -99,6 +118,7 @@ function createSvgCanvas() {
           feMerge = createSvgElement('feMerge', outlineFilter),
           feMergeNodeA = createSvgElement('feMergeNode', feMerge),
           feMergeNodeB = createSvgElement('feMergeNode', feMerge),
+          // background = createSvgElement('rect', svgElement),
           groundLayer = createSvgElement('g', svgElement),
           gridLayer = createSvgElement('g', svgElement);
     outlineFilter.setAttribute('id', 'outlineFilter');
@@ -108,6 +128,9 @@ function createSvgCanvas() {
     feMorphology.setAttribute('radius', '1');
     feMergeNodeA.setAttribute('in', 'dilated');
     feMergeNodeB.setAttribute('in', 'SourceGraphic');
+    // background.setAttribute('width', '100%');
+    // background.setAttribute('height', '100%');
+    // background.setAttribute('fill', '#000');
     groundLayer.setAttribute('filter', 'url(#outlineFilter)');
     groundLayer.setAttribute('shape-rendering', 'crispEdges');
     for(let j = 0; j < 2; ++j) {
@@ -173,7 +196,7 @@ export class LayerCoordinates {
         let latitude = equatorCoordinates.latitude;
         if(longitude > this.gpIndex*2)
             latitude -= longitude-this.gpIndex*2;
-        this.stripeLatitude = Math.floor(latitude/this.gpIndex),
+        this.stripeLatitude = Math.floor(latitude/this.gpIndex);
         this.indexInStripeLayer = latitude%this.gpIndex;
     }
 
@@ -215,6 +238,7 @@ export class LayerCoordinates {
     }
 }
 
+// TODO: The axial coordinate system, sometimes called “trapezoidal” or “oblique” or “skewed”, is built by taking two of the three coordinates from a cube coordinate system
 export class EquatorCoordinates {
     constructor(gpIndex, latitude=0, longitude=0) {
         this.gpIndex = gpIndex;
@@ -377,39 +401,33 @@ export class EquatorCoordinates {
         const currentCoordinates = new EquatorCoordinates(equatorCoordinatesA.gpIndex),
               neighborCoordinates = new EquatorCoordinates(equatorCoordinatesA.gpIndex),
               nextCoordinates = new EquatorCoordinates(equatorCoordinatesA.gpIndex),
-              triangleCoordinates = new TriangleCoordinates(equatorCoordinatesA.gpIndex),
-              dirA = vec3.create(),
-              dirB = vec3.create(),
-              dirC = vec3.create(),
-              dirD = vec3.create(),
-              normal = vec3.create();
+              triangleCoordinates = new TriangleCoordinates(equatorCoordinatesA.gpIndex);
         currentCoordinates.setLatitudeAndLongitude(equatorCoordinatesB.latitude, equatorCoordinatesB.longitude);
         triangleCoordinates.setStripeCoordinates(currentCoordinates);
-        triangleCoordinates.direction3D(dirB, angularInterpolation);
+        triangleCoordinates.direction3D(auxB, angularInterpolation);
         currentCoordinates.setLatitudeAndLongitude(equatorCoordinatesA.latitude, equatorCoordinatesA.longitude);
         triangleCoordinates.setStripeCoordinates(currentCoordinates);
-        triangleCoordinates.direction3D(dirA, angularInterpolation);
-        vec3.normalize(dirA, dirA);
-        vec3.normalize(dirB, dirB);
-        vec3.cross(normal, dirA, dirB);
+        triangleCoordinates.direction3D(auxC, angularInterpolation);
+        vec3.normalize(auxC, auxC);
+        vec3.normalize(auxB, auxB);
+        vec3.cross(auxD, auxC, auxB);
         while(true) {
             yield currentCoordinates;
             if(currentCoordinates.latitude == equatorCoordinatesB.latitude && currentCoordinates.longitude == equatorCoordinatesB.longitude)
                 break;
             triangleCoordinates.setStripeCoordinates(currentCoordinates);
-            triangleCoordinates.direction3D(dirC, angularInterpolation);
-            const maxAngle = vec3.angle(dirC, dirB);
+            triangleCoordinates.direction3D(auxC, angularInterpolation);
+            const turningBackThreshold = vec3.dot(auxC, auxB);
             let minimum = Infinity;
             for(let direction of ['-X', '+X', '-Y', '+Y', '-Z', '+Z']) {
                 neighborCoordinates.setLatitudeAndLongitude(currentCoordinates.latitude, currentCoordinates.longitude);
                 neighborCoordinates.navigate(direction);
                 triangleCoordinates.setStripeCoordinates(neighborCoordinates);
-                triangleCoordinates.direction3D(dirD, angularInterpolation);
-                const error = Math.abs(vec3.dot(dirD, normal));
-                if(vec3.angle(dirD, dirB) < maxAngle && error < minimum) {
+                triangleCoordinates.direction3D(auxC, angularInterpolation);
+                const error = Math.abs(vec3.dot(auxC, auxD));
+                if(vec3.dot(auxC, auxB) > turningBackThreshold && error < minimum) {
                     minimum = error;
                     nextCoordinates.setLatitudeAndLongitude(neighborCoordinates.latitude, neighborCoordinates.longitude);
-                    vec3.copy(dirC, dirD);
                 }
             }
             currentCoordinates.setLatitudeAndLongitude(nextCoordinates.latitude, nextCoordinates.longitude);
@@ -417,6 +435,7 @@ export class EquatorCoordinates {
     }
 }
 
+// Fruit Peeling
 export class SpiralCoordinates {
     constructor(gpIndex, indexInTotal=0) {
         this.gpIndex = gpIndex;
@@ -587,8 +606,8 @@ export class TriangleCoordinates {
     }
 
     direction3D(direction, angularInterpolation) {
-        vec3.scale(auxD, this.barycentric, 1.0/this.gpIndex);
-        barycentricInterpolation(direction, auxD, this.poleIndices().map(i => icosahedronVertices[i]), angularInterpolation);
+        vec3.scale(auxA, this.barycentric, 1.0/this.gpIndex);
+        barycentricInterpolation(direction, auxA, this.poleIndices().map(i => icosahedronVertices[i]), angularInterpolation);
     }
 
     fromDirection3D(direction, angularInterpolation) {
@@ -1092,7 +1111,7 @@ export class IcosahedralClass1GoldbergPolyhedron {
         return [glVertexBuffer, glElementBuffer];
     }
 
-    generateTextureImage() {
+    generateTextureImage(equatorCoordinatesB=new EquatorCoordinates(this.gpIndex, 22, 17)) {
         createSvgCanvas();
         svgElement.setAttribute('width', this.textureWidth);
         svgElement.setAttribute('height', this.textureHeight);
@@ -1101,10 +1120,16 @@ export class IcosahedralClass1GoldbergPolyhedron {
         svgElement.childNodes[0].childNodes[1].setAttribute('stroke-width', 2.0/this.pentagonRadius2D);
         svgElement.childNodes[0].childNodes[2].setAttribute('stroke-width', 2.0/this.edgeLength2D);
         const position2D = vec2.create(),
+              direction3D = vec3.create(),
               layerCoordinates = new LayerCoordinates(this.gpIndex),
-              equatorCoordinates = new EquatorCoordinates(this.gpIndex),
+              equatorCoordinates = new EquatorCoordinates(this.gpIndex, 19, 15),
               spiralCoordinates = new SpiralCoordinates(this.gpIndex),
-              triangleCoordinates = new TriangleCoordinates(this.gpIndex);
+              triangleCoordinates = new TriangleCoordinates(this.gpIndex),
+              path = new Set();
+        for(const field of EquatorCoordinates.getShortestPath(equatorCoordinates, equatorCoordinatesB, true)) {
+            spiralCoordinates.setLayerCoordinates(field);
+            path.add(spiralCoordinates.indexInTotal);
+        }
         const generateField = () => {
             equatorCoordinates.setStripeCoordinates(layerCoordinates);
             spiralCoordinates.setLayerCoordinates(layerCoordinates);
@@ -1120,11 +1145,21 @@ export class IcosahedralClass1GoldbergPolyhedron {
             if(isPole && equatorCoordinates.longitude < this.gpIndex*1.5)
                 transform += 'rotate(36)';
             tileElement.setAttribute('transform', transform);
-            tileElement.setAttribute('fill', '#AAA');
+            tileElement.setAttribute('fill', '#FFF');
             tileElement.setAttribute('href', (isPole) ? '#pentagon' : '#hexagon');
             textElement.setAttribute('transform', `translate(${position2D[0]},${position2D[1]+4})`);
             textElement.setAttribute('fill', '#000');
             textElement.textContent = `${equatorCoordinates.latitude} ${equatorCoordinates.longitude}`;
+            // triangleCoordinates.direction3D(direction3D, this.abandon == 'shape');
+            // triangleCoordinates.fromDirection3D(direction3D, this.abandon == 'shape');
+            // textElement.textContent = `${layerCoordinates.indexInStripeLayer} ${layerCoordinates.stripeLatitude} ${layerCoordinates.longitude}`;
+            // textElement.textContent = `${closestPole} ${distToClosestPole}`;
+            // textElement.textContent = `${layerCoordinates.indexInLayer} ${equatorCoordinates.indexInLayer}`;
+            // textElement.textContent = `${triangleCoordinates.barycentric[0]} ${triangleCoordinates.barycentric[1]} ${triangleCoordinates.barycentric[2]}`;
+            // tileElement.setAttribute('fill', `rgb(${triangleCoordinates.barycentric[0]*25+20}, ${triangleCoordinates.barycentric[1]*25+20}, ${triangleCoordinates.barycentric[2]*25+20})`);
+            // triangleCoordinates.direction3D(position3D);
+            // const distance = Math.round(10*vec3.angle(posA, position3D)));
+            // tileElement.setAttribute('fill', `rgb(${distance}, ${distance}, ${distance})`);
             borderElement.setAttribute('transform', transform);
             borderElement.setAttribute('fill', 'none');
             borderElement.setAttribute('stroke', '#000');
@@ -1140,6 +1175,22 @@ export class IcosahedralClass1GoldbergPolyhedron {
                 generateField();
             }
         }
+
+        /*for(let y = 0; y < this.gpIndex*5; ++y) {
+            const line = createSvgElement('path', svgElement.childNodes[2]);
+            line.setAttribute('stroke', '#000');
+            line.setAttribute('d', `M0 ${this.edgeLength2D*(1.5*y-0.5)}H${this.textureWidth}`);
+        }
+        for(let x = 0; x < this.gpIndex*5; ++x) {
+            const line = createSvgElement('path', svgElement.childNodes[2]);
+            line.setAttribute('stroke', '#000');
+            line.setAttribute('d', `M${this.fieldWidth2D*(0.5*(this.gpIndex*2)+x)} ${this.fieldHeight2D*(0.75*(this.gpIndex*3-1)+0.5)}L${this.fieldWidth2D*(0.5*(-this.gpIndex)+x)} ${this.fieldHeight2D*(0.75*(-1)+0.5)}`);
+        }
+        for(let x = -this.gpIndex*2; x < this.gpIndex*4; ++x) {
+            const line = createSvgElement('path', svgElement.childNodes[2]);
+            line.setAttribute('stroke', '#000');
+            line.setAttribute('d', `M${this.fieldWidth2D*(0.5*(this.gpIndex*2)+x)} ${this.fieldHeight2D*(0.75*(this.gpIndex*3-1)+0.5)}L${this.fieldWidth2D*(0.5*(-this.gpIndex)+x+this.gpIndex*3)} ${this.fieldHeight2D*(0.75*(-1)+0.5)}`);
+        }*/
         return svgElement;
     }
 }
